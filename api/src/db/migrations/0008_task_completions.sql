@@ -1,0 +1,22 @@
+CREATE TABLE task_completions (
+  id                      BINARY(16)      NOT NULL,
+  household_id            BINARY(16)      NOT NULL,
+  task_id                 BINARY(16)      NOT NULL,
+  member_id               BINARY(16)      NOT NULL,
+  completed_by_user_id    BINARY(16)      NULL,
+  completed_at            DATETIME(3)     NOT NULL,
+  points_awarded          INT UNSIGNED    NOT NULL,
+  task_title_snapshot     VARCHAR(120)    NOT NULL,
+  task_icon_snapshot      VARCHAR(16)     NOT NULL,
+  row_version             BIGINT UNSIGNED NOT NULL DEFAULT 1,
+  created_at              DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  KEY idx_completions_household_completed_at (household_id, completed_at),
+  KEY idx_completions_member_completed_at    (member_id, completed_at),
+  KEY idx_completions_task                   (task_id),
+  KEY idx_completions_row_version            (household_id, row_version),
+  CONSTRAINT fk_completions_household FOREIGN KEY (household_id) REFERENCES households(id),
+  CONSTRAINT fk_completions_task      FOREIGN KEY (task_id)      REFERENCES tasks(id),
+  CONSTRAINT fk_completions_member    FOREIGN KEY (member_id)    REFERENCES household_members(id),
+  CONSTRAINT fk_completions_actor     FOREIGN KEY (completed_by_user_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

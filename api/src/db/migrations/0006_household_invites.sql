@@ -1,0 +1,20 @@
+CREATE TABLE household_invites (
+  id                  BINARY(16)                          NOT NULL,
+  household_id        BINARY(16)                          NOT NULL,
+  code                CHAR(8)                             NOT NULL,
+  invited_email       VARCHAR(254)                        NULL,
+  invited_role        ENUM('adult','child')               NOT NULL,
+  invited_permission  ENUM('admin','member')              NOT NULL,
+  created_by_user_id  BINARY(16)                          NOT NULL,
+  max_uses            INT UNSIGNED                        NOT NULL DEFAULT 1,
+  used_count          INT UNSIGNED                        NOT NULL DEFAULT 0,
+  expires_at          DATETIME(3)                         NOT NULL,
+  revoked_at          DATETIME(3)                         NULL,
+  created_at          DATETIME(3)                         NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_invite_code (code),
+  KEY idx_invite_household (household_id),
+  KEY idx_invite_expires (expires_at),
+  CONSTRAINT fk_invite_household FOREIGN KEY (household_id)       REFERENCES households(id),
+  CONSTRAINT fk_invite_creator   FOREIGN KEY (created_by_user_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

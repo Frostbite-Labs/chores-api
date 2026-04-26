@@ -1,0 +1,20 @@
+CREATE TABLE refresh_tokens (
+  id              BINARY(16)      NOT NULL,
+  family_id       BINARY(16)      NOT NULL,
+  user_id         BINARY(16)      NOT NULL,
+  token_hash      CHAR(64)        NOT NULL,
+  device_label    VARCHAR(120)    NULL,
+  user_agent      VARCHAR(255)    NULL,
+  ip_address      VARBINARY(16)   NULL,
+  issued_at       DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  expires_at      DATETIME(3)     NOT NULL,
+  revoked_at      DATETIME(3)     NULL,
+  replaced_by_id  BINARY(16)      NULL,
+  replay_seen_at  DATETIME(3)     NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_refresh_token_hash (token_hash),
+  KEY idx_refresh_user (user_id),
+  KEY idx_refresh_family (family_id),
+  KEY idx_refresh_expires (expires_at),
+  CONSTRAINT fk_refresh_user FOREIGN KEY (user_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

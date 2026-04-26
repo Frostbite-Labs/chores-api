@@ -1,0 +1,92 @@
+# Local development stack — API + MySQL + Redis.
+#
+# Usage:
+#   docker compose -f docker-compose.local.yml up --build
+#   docker compose -f docker-compose.local.yml down
+#   docker compose -f docker-compose.local.yml down -v   # also wipes data volumes
+#
+# The `migrate` service runs once on `up`, applies any pending SQL migrations,
+# then exits. `api` waits for it to complete successfully before starting.
+#
+# OAuth env vars default to dummy values so the API boots; set real ones in the
+# shell or a .env file alongside this compose file if you need to exercise the
+# auth flows.
+
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-authentication-plugin=caching_sha2_password
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: chore_club
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  migrate:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    command: ["dist/db/migrate.js", "up"]
+    environment:
+      NODE_ENV: development
+      DB_URL: mysql://root:root@mysql:3306/chore_club
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
+      DB_URL: mysql://root:root@mysql:3306/chore_club
+      REDIS_URL: redis://redis:6379/0
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-local-dev-secret-not-for-production-aaaaaaaa}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-local-dev-google-client-id}
+      APPLE_SERVICE_ID: ${APPLE_SERVICE_ID:-local-dev-apple-service-id}
+      APPLE_TEAM_ID: ${APPLE_TEAM_ID:-local-dev-apple-team-id}
+      APPLE_KEY_ID: ${APPLE_KEY_ID:-local-dev-apple-key-id}
+      APPLE_PRIVATE_KEY: ${APPLE_PRIVATE_KEY:-local-dev-apple-private-key}
+    ports:
+      - "${API_PORT:-3000}:3000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  mysql_data:
+  redis_data:

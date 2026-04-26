@@ -1,0 +1,40 @@
+# Production stack — API only.
+#
+# Pulls a pre-built image (built via scripts/build.sh and pushed to a registry).
+# MySQL and Redis are assumed to be provisioned externally; their connection
+# strings come in via environment.
+#
+# Usage:
+#   docker compose -f docker-compose.live.yml --env-file .env.live up -d
+#   IMAGE_TAG=v1.2.3 docker compose -f docker-compose.live.yml up -d
+#
+# Required env (no defaults — missing values fail the API at boot, see
+# api/src/config/env.ts):
+#   IMAGE_REPOSITORY, IMAGE_TAG
+#   DB_URL, REDIS_URL, JWT_ACCESS_SECRET, GOOGLE_CLIENT_ID,
+#   APPLE_SERVICE_ID, APPLE_TEAM_ID, APPLE_KEY_ID, APPLE_PRIVATE_KEY
+#
+# Migrations are NOT applied automatically here — run them as a one-off as
+# part of the deploy pipeline:
+#   docker run --rm --env-file .env.live \
+#     ${IMAGE_REPOSITORY}:${IMAGE_TAG} dist/db/migrate.js up
+
+services:
+  api:
+    image: ${IMAGE_REPOSITORY:-chore-club-api}:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DB_URL: ${DB_URL}
+      REDIS_URL: ${REDIS_URL}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      APPLE_SERVICE_ID: ${APPLE_SERVICE_ID}
+      APPLE_TEAM_ID: ${APPLE_TEAM_ID}
+      APPLE_KEY_ID: ${APPLE_KEY_ID}
+      APPLE_PRIVATE_KEY: ${APPLE_PRIVATE_KEY}
+    ports:
+      - "${API_PORT:-3000}:3000"
+    stop_grace_period: 30s
