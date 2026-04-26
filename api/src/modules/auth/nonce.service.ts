@@ -25,7 +25,7 @@ export async function issueAppleNonce(): Promise<{ nonce: string; expiresAt: str
 /** Consume the nonce; throws if missing/expired (i.e. replay attempt). */
 export async function consumeAppleNonce(nonce: string): Promise<void> {
   const redis = getRedis();
-  // GETDEL is single-shot atomic — the read+delete cannot race.
+  // GETDEL is single-shot atomic - the read+delete cannot race.
   const existing = await redis.getdel(`${PREFIX}${nonce}`);
   if (!existing) {
     throw new AuthError({ code: 'auth.apple.nonce_invalid', detail: 'Apple nonce is missing, expired, or already used.' });

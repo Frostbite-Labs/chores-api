@@ -1,5 +1,5 @@
 /**
- * Auth service — bridges OAuth verifiers to our user/identity tables.
+ * Auth service - bridges OAuth verifiers to our user/identity tables.
  *
  *  - Upserts (provider, sub) → user. Apple's first-sign-in email is captured;
  *    subsequent absences are ignored (spec §5.1).

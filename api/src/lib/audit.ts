@@ -1,6 +1,6 @@
 /**
  * Audit log writer (spec §6.6). Best-effort for CRUD, mandatory for auth and
- * permission changes — callers decide which by either awaiting the write
+ * permission changes - callers decide which by either awaiting the write
  * or fire-and-forgetting.
  */
 import type { Kysely, Transaction } from 'kysely';
@@ -19,7 +19,7 @@ export interface AuditEntry {
 }
 
 /**
- * Append an audit row. Resolves on success; never throws — auditing must not
+ * Append an audit row. Resolves on success; never throws - auditing must not
  * mask the underlying business action's outcome. Failures are logged via the
  * caller's pino logger when `logFailure` is supplied.
  */
@@ -52,10 +52,10 @@ export async function audit(
 function ipToBuffer(ip: string): Buffer | null {
   // VARBINARY(16) accepts both v4 (4 bytes) and v6 (16 bytes); we store raw bytes.
   if (ip.includes(':')) {
-    // v6 — strip zone id, expand to bytes via URL parser.
+    // v6 - strip zone id, expand to bytes via URL parser.
     const groups = ip.split(':').flatMap((g) => (g === '' ? [] : [g]));
     if (groups.length === 0) return null;
-    // Best-effort parse; deliberately permissive — auditing should not reject.
+    // Best-effort parse; deliberately permissive - auditing should not reject.
     try {
       const expanded = expandV6(ip);
       return Buffer.from(expanded.replaceAll(':', ''), 'hex');

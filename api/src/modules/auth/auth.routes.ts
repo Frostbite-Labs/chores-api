@@ -27,14 +27,14 @@ function reqContext(req: FastifyRequest): { ipAddress?: string; userAgent?: stri
 }
 
 export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
-  // POST /auth/apple/nonce — 🔓
+  // POST /auth/apple/nonce - 🔓
   app.post(
     '/auth/apple/nonce',
     { config: { rateLimitBucket: 'auth' } },
     async () => issueAppleNonce(),
   );
 
-  // POST /auth/google — 🔓
+  // POST /auth/google - 🔓
   app.post(
     '/auth/google',
     { config: { rateLimitBucket: 'auth' } },
@@ -57,7 +57,7 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  // POST /auth/apple — 🔓
+  // POST /auth/apple - 🔓
   app.post(
     '/auth/apple',
     { config: { rateLimitBucket: 'auth' } },
@@ -81,7 +81,7 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  // POST /auth/refresh — 🔓
+  // POST /auth/refresh - 🔓
   app.post(
     '/auth/refresh',
     { config: { rateLimitBucket: 'auth' } },
@@ -96,7 +96,7 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  // POST /auth/logout — 🔒
+  // POST /auth/logout - 🔒
   app.post(
     '/auth/logout',
     { config: { requiresAuth: true, rateLimitBucket: 'authedDefault' } },
@@ -108,7 +108,7 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  // POST /auth/logout-all — 🔒
+  // POST /auth/logout-all - 🔒
   app.post(
     '/auth/logout-all',
     { config: { requiresAuth: true, rateLimitBucket: 'authedDefault' } },
@@ -120,7 +120,7 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  // DELETE /auth/account — 🔒. Begins deletion (spec §6.7).
+  // DELETE /auth/account - 🔒. Begins deletion (spec §6.7).
   app.delete(
     '/auth/account',
     { config: { requiresAuth: true, rateLimitBucket: 'authedDefault' } },
@@ -128,7 +128,7 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
       const user = req.appCtx.user!;
       const db = getDb();
 
-      // Owners with co-members must transfer first. We do this in two steps —
+      // Owners with co-members must transfer first. We do this in two steps -
       // the simpler shape is easier to read than a HAVING+GROUP BY chain.
       const ownedHouseholds = await db
         .selectFrom('households')

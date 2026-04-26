@@ -3,7 +3,7 @@
  *
  * Why both: mysql2 owns the connection pool and prepared-statement cache,
  * Kysely gives us type-safe SQL composition without ORM magic. We share one
- * pool — Kysely just adopts mysql2's connection.
+ * pool - Kysely just adopts mysql2's connection.
  */
 import mysql from 'mysql2/promise';
 import { Kysely, MysqlDialect } from 'kysely';

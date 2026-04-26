@@ -21,7 +21,7 @@ export interface ProblemDetails {
   errors?: unknown;
 }
 
-/** Cursor-based list payload — wire shape lives in headers, body is the array. */
+/** Cursor-based list payload - wire shape lives in headers, body is the array. */
 export interface PaginationHeaders {
   'X-Total-Count'?: string;
   Link?: string;

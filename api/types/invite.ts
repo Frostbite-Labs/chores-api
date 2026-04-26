@@ -19,7 +19,7 @@ export interface HouseholdInvite {
   createdAt: IsoTimestamp;
 }
 
-/** Returned only on `POST /v1/households/:id/invites` — the plaintext code. */
+/** Returned only on `POST /v1/households/:id/invites` - the plaintext code. */
 export interface HouseholdInviteWithCode {
   invite: HouseholdInvite;
   code: string;

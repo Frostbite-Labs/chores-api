@@ -1,5 +1,5 @@
 /**
- * Recurrence math + month-window helpers. Spec §8.7 — `next_due_at` advances
+ * Recurrence math + month-window helpers. Spec §8.7 - `next_due_at` advances
  * to `addInterval(completedAt, recurrence)` after each completion. The
  * arithmetic mirrors the client `completeTaskForMember` semantics described
  * there; we re-derive it here so the server is self-contained.
@@ -38,7 +38,7 @@ export function addInterval(from: Date, rule: RecurrenceRule): Date {
       );
     }
     default: {
-      // Exhaustive — the type guard tells us all four are handled.
+      // Exhaustive - the type guard tells us all four are handled.
       const _never: never = rule.unit;
       return _never;
     }

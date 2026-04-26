@@ -1,5 +1,5 @@
 /**
- * Task completions — append-only, with denormalised title/icon snapshots so
+ * Task completions - append-only, with denormalised title/icon snapshots so
  * historical leaderboards survive task edits and deletions. Spec §8.7, §10.8.
  */
 import type { IsoTimestamp, Uuid } from './api.js';

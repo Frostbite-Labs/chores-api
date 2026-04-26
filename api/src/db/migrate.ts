@@ -3,7 +3,7 @@
  * lexicographic order and applies any whose name is not in `schema_migrations`.
  *
  * Each file is one statement (or a small batch of related statements). MySQL
- * implicit-commits DDL, so a true transactional rollback is not possible —
+ * implicit-commits DDL, so a true transactional rollback is not possible -
  * keeping migrations small and additive is the discipline that makes this safe.
  */
 import { promises as fs } from 'node:fs';

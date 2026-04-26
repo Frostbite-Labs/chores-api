@@ -41,7 +41,7 @@ export interface SyncPushItem<TKind extends SyncPushKind = SyncPushKind, TPayloa
   payload: TPayload;
   /** Optimistic-concurrency hint for update kinds. */
   ifMatchRowVersion?: number;
-  /** For completion.create — the task's row_version the client last saw. */
+  /** For completion.create - the task's row_version the client last saw. */
   ifMatchTaskRowVersion?: number;
 }
 

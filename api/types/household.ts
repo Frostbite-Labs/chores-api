@@ -3,7 +3,7 @@
  *
  * `HouseholdRole` and `HouseholdPermission` are deliberately separate concepts:
  * roles gate which tasks a member can complete (domain), permissions gate API
- * actions (access control). See §5.3 — "do not conflate them".
+ * actions (access control). See §5.3 - "do not conflate them".
  */
 import type { IsoTimestamp, Uuid } from './api.js';
 

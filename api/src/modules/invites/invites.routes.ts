@@ -34,7 +34,7 @@ function generateCode(): string {
 }
 
 export async function registerInvitesRoutes(app: FastifyInstance): Promise<void> {
-  // POST /households/:id/invites — 🔒 + admin
+  // POST /households/:id/invites - 🔒 + admin
   app.post(
     '/households/:householdId/invites',
     { config: { requiresAuth: true, requiresHouseholdPermission: 'admin', rateLimitBucket: 'authedDefault' } },
@@ -103,7 +103,7 @@ export async function registerInvitesRoutes(app: FastifyInstance): Promise<void>
     },
   );
 
-  // GET /households/:id/invites — 🔒 + admin
+  // GET /households/:id/invites - 🔒 + admin
   app.get(
     '/households/:householdId/invites',
     { config: { requiresAuth: true, requiresHouseholdPermission: 'admin', rateLimitBucket: 'authedDefault' } },
@@ -133,7 +133,7 @@ export async function registerInvitesRoutes(app: FastifyInstance): Promise<void>
     },
   );
 
-  // DELETE /households/:id/invites/:inviteId — 🔒 + admin
+  // DELETE /households/:id/invites/:inviteId - 🔒 + admin
   app.delete(
     '/households/:householdId/invites/:inviteId',
     { config: { requiresAuth: true, requiresHouseholdPermission: 'admin', rateLimitBucket: 'authedDefault' } },
@@ -150,7 +150,7 @@ export async function registerInvitesRoutes(app: FastifyInstance): Promise<void>
     },
   );
 
-  // POST /invites/redeem — 🔒 (NOT under :householdId; the redeemer doesn't know it).
+  // POST /invites/redeem - 🔒 (NOT under :householdId; the redeemer doesn't know it).
   app.post(
     '/invites/redeem',
     { config: { requiresAuth: true, rateLimitBucket: 'inviteRedeem' } },

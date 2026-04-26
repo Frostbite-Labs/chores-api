@@ -1,5 +1,5 @@
 /**
- * Recurrence math sanity. We deliberately keep this self-contained — adding
+ * Recurrence math sanity. We deliberately keep this self-contained - adding
  * the client-side equivalent later should keep these expectations stable.
  */
 import { describe, expect, it } from 'vitest';

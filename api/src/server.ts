@@ -1,5 +1,5 @@
 /**
- * Server entrypoint — boot the Fastify instance, listen, and wire SIGTERM to
+ * Server entrypoint - boot the Fastify instance, listen, and wire SIGTERM to
  * a graceful close so in-flight requests drain.
  */
 import { buildApp } from './app.js';

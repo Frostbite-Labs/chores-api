@@ -20,7 +20,7 @@ const memberParamsSchema = z.object({ householdId: uuidSchema, memberId: uuidSch
 const householdParamsSchema = z.object({ householdId: uuidSchema });
 
 export async function registerMembersRoutes(app: FastifyInstance): Promise<void> {
-  // GET /households/:id/members — 🔒 + member
+  // GET /households/:id/members - 🔒 + member
   app.get(
     '/households/:householdId/members',
     { config: { requiresAuth: true, requiresHouseholdPermission: 'member', rateLimitBucket: 'authedDefault' } },
@@ -36,7 +36,7 @@ export async function registerMembersRoutes(app: FastifyInstance): Promise<void>
     },
   );
 
-  // POST /households/:id/members — 🔒 + admin (standalone members only)
+  // POST /households/:id/members - 🔒 + admin (standalone members only)
   app.post(
     '/households/:householdId/members',
     { config: { requiresAuth: true, requiresHouseholdPermission: 'admin', rateLimitBucket: 'authedDefault' } },
@@ -78,7 +78,7 @@ export async function registerMembersRoutes(app: FastifyInstance): Promise<void>
     },
   );
 
-  // PATCH /households/:id/members/:memberId — 🔒 + admin (member can self-edit displayName/avatar/color)
+  // PATCH /households/:id/members/:memberId - 🔒 + admin (member can self-edit displayName/avatar/color)
   app.patch(
     '/households/:householdId/members/:memberId',
     { config: { requiresAuth: true, requiresHouseholdPermission: 'member', rateLimitBucket: 'authedDefault' } },
@@ -165,7 +165,7 @@ export async function registerMembersRoutes(app: FastifyInstance): Promise<void>
     },
   );
 
-  // DELETE /households/:id/members/:memberId — 🔒 + admin
+  // DELETE /households/:id/members/:memberId - 🔒 + admin
   app.delete(
     '/households/:householdId/members/:memberId',
     { config: { requiresAuth: true, requiresHouseholdPermission: 'admin', rateLimitBucket: 'authedDefault' } },

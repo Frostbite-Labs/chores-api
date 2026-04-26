@@ -8,7 +8,7 @@
  *
  * Push: each operation runs in its own transaction. Server-wins on
  *       updates (returns `current` on stale ifMatch); completions never
- *       conflict with each other (append-only) — the only failure modes
+ *       conflict with each other (append-only) - the only failure modes
  *       are a missing task or lost permission.
  */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
@@ -30,14 +30,14 @@ import { audit } from '@/lib/audit.js';
 const householdParamsSchema = z.object({ householdId: uuidSchema });
 
 export async function registerSyncRoutes(app: FastifyInstance): Promise<void> {
-  // GET /sync — 🔒 + member
+  // GET /sync - 🔒 + member
   app.get(
     '/households/:householdId/sync',
     { config: { requiresAuth: true, requiresHouseholdPermission: 'member', rateLimitBucket: 'authedDefault' } },
     async (req) => buildPull(req),
   );
 
-  // POST /sync — 🔒 + member
+  // POST /sync - 🔒 + member
   app.post(
     '/households/:householdId/sync',
     { config: { requiresAuth: true, requiresHouseholdPermission: 'member', rateLimitBucket: 'writeHotPath' } },
@@ -107,7 +107,7 @@ async function buildPull(req: FastifyRequest): Promise<SyncDelta> {
     else if (t.entity_type === 'completion') completionDeleted.push(id);
   }
 
-  // Page by byte budget — once we exceed it, drop the trailing items in priority
+  // Page by byte budget - once we exceed it, drop the trailing items in priority
   // order (completions first, since they're append-only and re-pull is cheap).
   const partial: SyncDelta = {
     rowVersion: Number(household.row_version),
@@ -152,7 +152,7 @@ function sliceUpTo(d: SyncDelta, version: number): SyncDelta {
     ...d,
     members: {
       upserted: d.members.upserted.filter((m) => m.rowVersion <= version),
-      deleted: d.members.deleted, // keep — they're version-bounded by tombstone version, conservative is fine
+      deleted: d.members.deleted, // keep - they're version-bounded by tombstone version, conservative is fine
     },
     tasks: {
       upserted: d.tasks.upserted.filter((t) => t.rowVersion <= version),
@@ -181,7 +181,7 @@ async function applyPush(req: FastifyRequest): Promise<SyncPushResponse> {
       results.push(await applyOne(op, params.householdId, acting, userId));
     } catch (err) {
       // Translate to a per-operation rejected result rather than failing the
-      // whole push — clients want partial progress.
+      // whole push - clients want partial progress.
       const r: SyncPushResult = { clientId: op.clientId, status: 'rejected' };
       if (err instanceof ConflictError) {
         r.status = 'conflict';
@@ -252,7 +252,7 @@ async function applyOne(
         if (op.ifMatchRowVersion !== undefined && op.ifMatchRowVersion !== Number(current.row_version)) {
           throw new ConflictError({
             code: 'concurrency.row_version_stale',
-            detail: 'task.update — row_version stale',
+            detail: 'task.update - row_version stale',
             errors: { current: rowToTask(current) },
           });
         }
@@ -312,7 +312,7 @@ async function applyOne(
       return { clientId: op.clientId, status: 'applied', serverId: op.payload.id };
     }
     case 'completion.create': {
-      // Append-only — never conflicts; only fails on missing task or lost permission.
+      // Append-only - never conflicts; only fails on missing task or lost permission.
       const id = newUuid();
       const out = await db.transaction().execute(async (tx) => {
         const task = await tx
@@ -325,9 +325,9 @@ async function applyOne(
           .executeTakeFirst();
         if (!task) throw new NotFoundError({ code: 'task.not_found', detail: 'Task not found.' });
         if (op.ifMatchTaskRowVersion !== undefined && op.ifMatchTaskRowVersion !== Number(task.row_version)) {
-          // Server-wins per spec — completions never conflict, but the client
+          // Server-wins per spec - completions never conflict, but the client
           // wanted to bind to a specific task version; we still apply (it's
-          // safe — completions are append-only) but report the new version.
+          // safe - completions are append-only) but report the new version.
         }
         const member = await tx
           .selectFrom('household_members')
@@ -443,7 +443,7 @@ async function applyOne(
         if (op.ifMatchRowVersion !== undefined && op.ifMatchRowVersion !== Number(current.row_version)) {
           throw new ConflictError({
             code: 'concurrency.row_version_stale',
-            detail: 'member.update — row_version stale',
+            detail: 'member.update - row_version stale',
             errors: { current: rowToMember(current) },
           });
         }

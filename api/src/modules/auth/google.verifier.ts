@@ -3,7 +3,7 @@
  *
  * We rely on `jose`'s remote JWKS helper, which caches keys per the JWKS
  * endpoint's `Cache-Control` and rotates automatically. Validating against
- * Google's expected `iss` and `aud` is non-negotiable — without `aud` you can
+ * Google's expected `iss` and `aud` is non-negotiable - without `aud` you can
  * accept tokens issued for other services.
  */
 import { createRemoteJWKSet, jwtVerify } from 'jose';
@@ -34,7 +34,7 @@ export async function verifyGoogleIdToken(idToken: string): Promise<VerifiedIden
   try {
     const result = await jwtVerify(idToken, getJwks(), {
       audience: env.GOOGLE_CLIENT_ID,
-      // jose validates `iss` against this set — `||` accepted form just in case Google rotates.
+      // jose validates `iss` against this set - `||` accepted form just in case Google rotates.
       issuer: [...GOOGLE_ISSUERS],
     });
     payload = result.payload as unknown as GoogleClaims;

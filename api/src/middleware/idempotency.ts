@@ -33,7 +33,7 @@ export async function lookup(req: FastifyRequest): Promise<IdempotencyHit | null
     throw new ValidationError({ code: 'idempotency.invalid_key', detail: 'Idempotency-Key must be a UUIDv4.' });
   }
   if (!req.appCtx?.user) {
-    // Unauthenticated callers (e.g. /auth/google) — key the lookup by IP via the request hash.
+    // Unauthenticated callers (e.g. /auth/google) - key the lookup by IP via the request hash.
     return null;
   }
 

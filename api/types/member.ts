@@ -1,5 +1,5 @@
 /**
- * HouseholdMember — `userId === null` means a standalone member (e.g. a child
+ * HouseholdMember - `userId === null` means a standalone member (e.g. a child
  * with no account). Spec §8.4, §10.5.
  */
 import type { IsoTimestamp, Uuid } from './api.js';

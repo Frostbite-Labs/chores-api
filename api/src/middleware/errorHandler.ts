@@ -1,5 +1,5 @@
 /**
- * Fastify error handler — every response leaving this server is either a
+ * Fastify error handler - every response leaving this server is either a
  * success body or RFC 7807 `application/problem+json`. Anything that isn't
  * already an `AppError` is re-shaped as a 500 so we never leak stack frames.
  *

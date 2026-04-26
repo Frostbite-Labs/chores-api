@@ -17,7 +17,7 @@ const householdParamsSchema = z.object({ householdId: uuidSchema });
 const taskParamsSchema = z.object({ householdId: uuidSchema, taskId: uuidSchema });
 
 export async function registerTasksRoutes(app: FastifyInstance): Promise<void> {
-  // GET /tasks — 🔒 + member
+  // GET /tasks - 🔒 + member
   app.get(
     '/households/:householdId/tasks',
     { config: { requiresAuth: true, requiresHouseholdPermission: 'member', rateLimitBucket: 'authedDefault' } },
@@ -36,7 +36,7 @@ export async function registerTasksRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  // POST /tasks — 🔒 + admin
+  // POST /tasks - 🔒 + admin
   app.post(
     '/households/:householdId/tasks',
     { config: { requiresAuth: true, requiresHouseholdPermission: 'admin', rateLimitBucket: 'writeHotPath' } },
@@ -82,7 +82,7 @@ export async function registerTasksRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  // GET /tasks/:taskId — 🔒 + member
+  // GET /tasks/:taskId - 🔒 + member
   app.get(
     '/households/:householdId/tasks/:taskId',
     { config: { requiresAuth: true, requiresHouseholdPermission: 'member', rateLimitBucket: 'authedDefault' } },
@@ -102,7 +102,7 @@ export async function registerTasksRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  // PATCH /tasks/:taskId — 🔒 + admin (If-Match required)
+  // PATCH /tasks/:taskId - 🔒 + admin (If-Match required)
   app.patch(
     '/households/:householdId/tasks/:taskId',
     { config: { requiresAuth: true, requiresHouseholdPermission: 'admin', rateLimitBucket: 'writeHotPath' } },
@@ -166,7 +166,7 @@ export async function registerTasksRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  // DELETE /tasks/:taskId — 🔒 + admin
+  // DELETE /tasks/:taskId - 🔒 + admin
   app.delete(
     '/households/:householdId/tasks/:taskId',
     { config: { requiresAuth: true, requiresHouseholdPermission: 'admin', rateLimitBucket: 'writeHotPath' } },

@@ -1,6 +1,6 @@
 /**
  * Household + member row mappers and the household row-version bumper used by
- * mutations. Spec §4 — "row_version is bumped by application code inside the
+ * mutations. Spec §4 - "row_version is bumped by application code inside the
  * same transaction as the write".
  */
 import type { Kysely, Transaction } from 'kysely';

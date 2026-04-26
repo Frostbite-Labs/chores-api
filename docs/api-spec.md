@@ -1,4 +1,4 @@
-# Chore Club — Backend API Specification
+# Chore Club - Backend API Specification
 
 **Status:** Draft v1
 **Owner:** Daniel Patterson
@@ -28,14 +28,14 @@ This document specifies the cloud backend that turns the existing local-only Exp
 - Let a user sign in with **Google** or **Apple** (no passwords, ever).
 - Let a user create a household, invite other accounts, and assign per-household roles (`adult` / `child`) and permissions (`owner` / `admin` / `member`).
 - Synchronise tasks, completions, and the monthly leaderboard between devices in near-real-time, with offline-tolerant delta sync.
-- Keep the existing client data model (`HouseholdState`, `TaskRecord`, `TaskCompletion`, `HouseholdMember`) backwards-compatible — server fields are a superset of what the client already uses.
+- Keep the existing client data model (`HouseholdState`, `TaskRecord`, `TaskCompletion`, `HouseholdMember`) backwards-compatible - server fields are a superset of what the client already uses.
 
 ### Non-goals (v1)
 
 - Web-app sessions / browser cookies. The API serves the mobile client only; auth is bearer-token based.
 - Push notifications. Out of scope; will need a follow-up doc covering APNs + FCM.
 - Real-time channels (websockets). v1 uses pull-based sync; switching to push is a future delta on `/sync`.
-- Email/password auth. Intentionally excluded — the lower attack surface of OAuth-only is a hard requirement.
+- Email/password auth. Intentionally excluded - the lower attack surface of OAuth-only is a hard requirement.
 
 ---
 
@@ -107,7 +107,7 @@ api/
 │   │   ├── audit.ts                  # writes to audit_log
 │   │   └── errors.ts                 # AppError + subclasses
 │   └── schemas/                      # zod schemas (request/response bodies)
-└── types/                            # PURE type declarations only — no runtime code
+└── types/                            # PURE type declarations only - no runtime code
     ├── api.ts                        # Envelope, ProblemDetails, Pagination
     ├── auth.ts                       # AccessTokenClaims, RefreshTokenRecord, OAuthProvider
     ├── user.ts                       # User, UserIdentity
@@ -158,38 +158,38 @@ The mobile client performs the OAuth dance natively (Expo `expo-auth-session` fo
 
 - **Google.** Client posts `{ idToken }` to `POST /v1/auth/google`. Server fetches `https://www.googleapis.com/oauth2/v3/certs`, caches keys per `Cache-Control`, verifies signature, `iss ∈ {accounts.google.com, https://accounts.google.com}`, `aud == GOOGLE_CLIENT_ID`, `exp`, `nbf`. The token's `sub` is the durable identity; `email` is used only for invite matching when `email_verified == true`.
 - **Apple.** Client posts `{ identityToken, authorizationCode? }` to `POST /v1/auth/apple`. Server verifies against `https://appleid.apple.com/auth/keys`, checks `iss == https://appleid.apple.com`, `aud == APPLE_SERVICE_ID`, `exp`, and validates the `nonce` claim against a server-generated nonce that the client received when calling `POST /v1/auth/apple/nonce` (replay protection).
-  - Apple may return a **private relay email** (`*@privaterelay.appleid.com`) on first sign-in only. We persist it and never assume the user can receive mail at it — invite matching falls back to user-driven code entry.
+  - Apple may return a **private relay email** (`*@privaterelay.appleid.com`) on first sign-in only. We persist it and never assume the user can receive mail at it - invite matching falls back to user-driven code entry.
   - On subsequent sign-ins Apple omits `email`; we rely on `sub`.
 
 ### 5.2 Tokens
 
 | Token | Format | Lifetime | Storage |
 | --- | --- | --- | --- |
-| **Access** | JWT (HS256, server-only secret) — claims: `sub` (user UUID), `sid` (refresh family id), `iat`, `exp`, `scope` | **15 min** | Client memory only. |
+| **Access** | JWT (HS256, server-only secret) - claims: `sub` (user UUID), `sid` (refresh family id), `iat`, `exp`, `scope` | **15 min** | Client memory only. |
 | **Refresh** | Opaque 32-byte URL-safe random string | **30 days**, rotated on every use | Server stores **only `SHA-256(token)`** in `refresh_tokens`. |
 
 Refresh-token rotation rules:
 
 - Each `POST /v1/auth/refresh` invalidates the presented token and issues a new one in the same **family** (`refresh_token_family_id`).
 - If a **revoked** refresh token is presented, the entire family is revoked and an `auth.refresh.replay_detected` audit row is written. The client must reauthenticate via OAuth.
-- Refresh tokens are bound to a `device_label`, `user_agent`, and the IP of issuance (advisory — geo-jumps are logged but not blocked).
+- Refresh tokens are bound to a `device_label`, `user_agent`, and the IP of issuance (advisory - geo-jumps are logged but not blocked).
 
 ### 5.3 Authorization model
 
 Two orthogonal concepts. **Do not conflate them.**
 
-- **Household role** (`adult` | `child`) — domain concept; gates which tasks a member can complete (see `task.audience` in the existing client). Has no bearing on API permissions.
-- **Household permission** (`owner` | `admin` | `member`) — access-control concept; gates API actions:
+- **Household role** (`adult` | `child`) - domain concept; gates which tasks a member can complete (see `task.audience` in the existing client). Has no bearing on API permissions.
+- **Household permission** (`owner` | `admin` | `member`) - access-control concept; gates API actions:
 
 | Action | `owner` | `admin` | `member` |
 | --- | --- | --- | --- |
 | Read household, tasks, completions | ✅ | ✅ | ✅ |
 | Complete a task as self | ✅ | ✅ | ✅ |
-| Complete a task on behalf of a non-account member (e.g. a child) | ✅ | ✅ | — |
-| Create / edit / delete tasks | ✅ | ✅ | — |
-| Add / remove members, manage invites | ✅ | ✅ | — |
-| Rename household | ✅ | ✅ | — |
-| Transfer ownership, delete household | ✅ | — | — |
+| Complete a task on behalf of a non-account member (e.g. a child) | ✅ | ✅ | - |
+| Create / edit / delete tasks | ✅ | ✅ | - |
+| Add / remove members, manage invites | ✅ | ✅ | - |
+| Rename household | ✅ | ✅ | - |
+| Transfer ownership, delete household | ✅ | - | - |
 
 The `authorize` middleware loads `household_members` for `(req.user.id, req.params.householdId)` once per request and attaches it to `req.context`. Every handler that operates on household data **must** declare the minimum required permission via a route-level decorator; missing decorators fail closed in CI via a unit test.
 
@@ -238,7 +238,7 @@ Every state-changing action writes a row to `audit_log` with `(actor_user_id, ho
 ### 6.7 Account lifecycle
 
 - **Account deletion** (`DELETE /v1/auth/account`) sets `users.deleted_at`, anonymises `display_name`, drops `user_identities` rows immediately (so re-signing in creates a fresh account), and schedules a hard-purge job after 30 days. Households where the user was sole owner and sole member are deleted. Households where they were owner with other members trigger an ownership-transfer prompt; the API rejects deletion until ownership is reassigned.
-- **Provider unlink** is intentionally not exposed in v1 — a single linked provider is the only way back in. v2 may allow linking both Google and Apple to one account.
+- **Provider unlink** is intentionally not exposed in v1 - a single linked provider is the only way back in. v2 may allow linking both Google and Apple to one account.
 
 ---
 
@@ -250,7 +250,7 @@ URL-prefixed: `/v1/...`. Breaking changes require `/v2`; additive changes (new f
 
 ### 7.2 Response envelope
 
-Single-resource and list responses are NOT wrapped — the body **is** the resource (or an array). Errors use RFC 7807 `application/problem+json` (see §4). Pagination metadata travels in headers:
+Single-resource and list responses are NOT wrapped - the body **is** the resource (or an array). Errors use RFC 7807 `application/problem+json` (see §4). Pagination metadata travels in headers:
 
 - `X-Total-Count: 1234`
 - `Link: </v1/.../completions?cursor=eyJ...>; rel="next"`
@@ -286,7 +286,7 @@ Identity, session lifecycle, and account closure.
 
 ### 8.2 Users / Me (`/v1/me`)
 
-The current user — never the user's IDP profile. There is intentionally no `/v1/users/:id` lookup; users are addressed through household membership.
+The current user - never the user's IDP profile. There is intentionally no `/v1/users/:id` lookup; users are addressed through household membership.
 
 | Method | Path | Auth | Description |
 | --- | --- | --- | --- |
@@ -308,7 +308,7 @@ The aggregate root of the domain.
 
 ### 8.4 Members (`/v1/households/:householdId/members`)
 
-Members come in two flavours. **Account-backed members** (`user_id IS NOT NULL`) correspond to a real Google/Apple user. **Standalone members** (`user_id IS NULL`) represent young children or pets — they have an avatar, a name, a role, and earn points, but no one logs in as them. Completions for standalone members are recorded by an `admin`/`owner` "on behalf of" them.
+Members come in two flavours. **Account-backed members** (`user_id IS NOT NULL`) correspond to a real Google/Apple user. **Standalone members** (`user_id IS NULL`) represent young children or pets - they have an avatar, a name, a role, and earn points, but no one logs in as them. Completions for standalone members are recorded by an `admin`/`owner` "on behalf of" them.
 
 | Method | Path | Auth | Description |
 | --- | --- | --- | --- |
@@ -319,7 +319,7 @@ Members come in two flavours. **Account-backed members** (`user_id IS NOT NULL`)
 
 ### 8.5 Invites (`/v1/households/:householdId/invites` and `/v1/invites/redeem`)
 
-Codes are 8 chars from a Crockford-ish alphabet (`ABCDEFGHJKLMNPQRSTUVWXYZ23456789`) — no `0/O`, `1/I/L`. The redeem endpoint is **not** nested under a household, because the redeemer doesn't know the household ID until they redeem.
+Codes are 8 chars from a Crockford-ish alphabet (`ABCDEFGHJKLMNPQRSTUVWXYZ23456789`) - no `0/O`, `1/I/L`. The redeem endpoint is **not** nested under a household, because the redeemer doesn't know the household ID until they redeem.
 
 | Method | Path | Auth | Description |
 | --- | --- | --- | --- |
@@ -330,7 +330,7 @@ Codes are 8 chars from a Crockford-ish alphabet (`ABCDEFGHJKLMNPQRSTUVWXYZ234567
 
 ### 8.6 Tasks (`/v1/households/:householdId/tasks`)
 
-Direct mirror of the client's `TaskRecord` shape (see `src/types.ts`). Completing a task **does not** mutate the task via this group — see §8.7.
+Direct mirror of the client's `TaskRecord` shape (see `src/types.ts`). Completing a task **does not** mutate the task via this group - see §8.7.
 
 | Method | Path | Auth | Description |
 | --- | --- | --- | --- |
@@ -346,7 +346,7 @@ Logging a completion is the hot path of the app, so it has its own group with id
 
 | Method | Path | Auth | Description |
 | --- | --- | --- | --- |
-| `POST` | `/tasks/:taskId/completions` | 🔒 + 👑member (admin if `memberId !== self`) | Body: `{ memberId, completedAt? }`. In one transaction: inserts a `task_completion` snapshot, advances `tasks.next_due_at = addInterval(completedAt, recurrence)` (matching client semantics — see `src/lib/household.ts` `completeTaskForMember`), bumps `tasks.row_version`. Returns `{ completion, task }`. **Honours `Idempotency-Key`.** |
+| `POST` | `/tasks/:taskId/completions` | 🔒 + 👑member (admin if `memberId !== self`) | Body: `{ memberId, completedAt? }`. In one transaction: inserts a `task_completion` snapshot, advances `tasks.next_due_at = addInterval(completedAt, recurrence)` (matching client semantics - see `src/lib/household.ts` `completeTaskForMember`), bumps `tasks.row_version`. Returns `{ completion, task }`. **Honours `Idempotency-Key`.** |
 | `GET` | `/completions` | 🔒 + 👑member | Query: `?from=&to=&memberId=&taskId=&cursor=&limit=` (default 50, max 200). Cursor pagination over `(completed_at, id)`. |
 | `DELETE` | `/completions/:completionId` | 🔒 + 👑admin | Hard delete; recomputes the affected task's `next_due_at` based on prior completions if any. |
 
@@ -372,7 +372,7 @@ See §9 for full protocol.
 
 ### 9.1 Pull (`GET /sync?since=N`)
 
-The household carries a monotonic `households.row_version`. Each child table (`tasks`, `household_members`, `task_completions`) carries its own `row_version` and a parent `household_id`. A "household row version" is `MAX(row_version)` across the household and all its children — maintained by triggers (or in the application layer) on every write.
+The household carries a monotonic `households.row_version`. Each child table (`tasks`, `household_members`, `task_completions`) carries its own `row_version` and a parent `household_id`. A "household row version" is `MAX(row_version)` across the household and all its children - maintained by triggers (or in the application layer) on every write.
 
 Response:
 
@@ -463,7 +463,7 @@ CREATE TABLE users (
 ) ENGINE=InnoDB;
 ```
 
-`email` is nullable because Apple users on a private relay may opt out of sharing — we still want the account.
+`email` is nullable because Apple users on a private relay may opt out of sharing - we still want the account.
 
 ### 10.2 `user_identities`
 
@@ -549,7 +549,7 @@ CREATE TABLE household_members (
 ) ENGINE=InnoDB;
 ```
 
-> **Note on `uq_member_household_user`.** MySQL allows multiple NULLs in a unique index, which is the behaviour we want — we can have many standalone members but at most one row per `(household, real-user)`.
+> **Note on `uq_member_household_user`.** MySQL allows multiple NULLs in a unique index, which is the behaviour we want - we can have many standalone members but at most one row per `(household, real-user)`.
 
 ### 10.6 `household_invites`
 
@@ -701,9 +701,9 @@ households 1───* sync_tombstones
 
 ## 11. Migrations & operational notes
 
-- **Forward-only SQL migrations** in `src/db/migrations/`. Each file is `NNNN_short_name.sql` and is wrapped in a transaction by the migrator (DDL caveats apply on MySQL — keep one `ALTER` per file).
+- **Forward-only SQL migrations** in `src/db/migrations/`. Each file is `NNNN_short_name.sql` and is wrapped in a transaction by the migrator (DDL caveats apply on MySQL - keep one `ALTER` per file).
 - **Backups.** Daily logical (mysqldump) + 7-day PITR via binlog. Tested restore quarterly.
-- **Secrets.** `GOOGLE_CLIENT_ID`, `APPLE_SERVICE_ID`, `APPLE_TEAM_ID`, `APPLE_KEY_ID`, `APPLE_PRIVATE_KEY` (PEM), `JWT_ACCESS_SECRET`, `DB_URL`, `REDIS_URL` — all in the platform's secret manager, mounted as env. `config/env.ts` validates presence and shape on boot; the server refuses to start if anything is missing.
+- **Secrets.** `GOOGLE_CLIENT_ID`, `APPLE_SERVICE_ID`, `APPLE_TEAM_ID`, `APPLE_KEY_ID`, `APPLE_PRIVATE_KEY` (PEM), `JWT_ACCESS_SECRET`, `DB_URL`, `REDIS_URL` - all in the platform's secret manager, mounted as env. `config/env.ts` validates presence and shape on boot; the server refuses to start if anything is missing.
 - **Health.** `GET /healthz` returns 200 if the DB ping and Redis ping succeed in < 250ms; readiness probe gates traffic.
 - **Observability.** Pino logs with request id; metrics for request count, p50/p95/p99 latency per route, `auth.refresh.replay_detected` counter (alert > 0 in any 5-minute window), and `sync.conflict` counter.
 
@@ -714,5 +714,5 @@ households 1───* sync_tombstones
 1. **Linking multiple providers to one user.** Out of scope for v1, but the `user_identities` table is already shaped for it. Decide UX before enabling.
 2. **Two-factor for `owner` actions** (transfer, delete household). Worth adding once we have an email channel; until then, owners can only act from a freshly authenticated session (< 5 min since last OAuth).
 3. **Push notifications.** Likely needs a `device_tokens` table keyed off `refresh_token_family_id` so logout invalidates pushes. Defer to its own spec.
-4. **Web admin / parent dashboard.** Would need a real CORS policy and probably session cookies — bearer tokens fit native better than browsers.
-5. **Hard-delete schedule** — confirm 30-day grace period meets GDPR request SLA in target markets (EU = "without undue delay, and in any event within 1 month").
+4. **Web admin / parent dashboard.** Would need a real CORS policy and probably session cookies - bearer tokens fit native better than browsers.
+5. **Hard-delete schedule** - confirm 30-day grace period meets GDPR request SLA in target markets (EU = "without undue delay, and in any event within 1 month").

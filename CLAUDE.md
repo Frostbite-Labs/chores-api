@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This repo currently contains the **Chore Club backend API** only. The Expo mobile client lives in a sibling directory; references to "the client" in code/comments point there, not here.
 
-- `api/` — the Node/Fastify service (all code lives here; `cd api` for every command below).
-- `docs/api-spec.md` — the authoritative specification. Comments throughout the source cite section numbers (e.g. "spec §5.3"). When in doubt about intended behaviour, this document wins over inferences from code.
+- `api/` - the Node/Fastify service (all code lives here; `cd api` for every command below).
+- `docs/api-spec.md` - the authoritative specification. Comments throughout the source cite section numbers (e.g. "spec §5.3"). When in doubt about intended behaviour, this document wins over inferences from code.
 
 ## Common commands
 
@@ -27,17 +27,17 @@ npm run migrate          # apply pending SQL migrations (forward-only)
 npm run migrate:status   # show applied/pending list
 ```
 
-The server fail-fasts on boot if any required env var is missing or malformed — see `api/.env.example` and `src/config/env.ts`. MySQL 8.0+ with `utf8mb4_0900_ai_ci` and Redis are both required even for local dev (the `/healthz` route pings both).
+The server fail-fasts on boot if any required env var is missing or malformed - see `api/.env.example` and `src/config/env.ts`. MySQL 8.0+ with `utf8mb4_0900_ai_ci` and Redis are both required even for local dev (the `/healthz` route pings both).
 
 ## Architecture
 
 ### Layering
 
-Strict three-layer split — **do not** put SQL in route handlers or business rules in repositories:
+Strict three-layer split - **do not** put SQL in route handlers or business rules in repositories:
 
-1. **Routes** (`src/modules/<group>/*.routes.ts`) — Zod-validate input via `parseBody`/`parseParams`/`parseQuery`, call services, format the response. Declare `requiresAuth` / `requiresHouseholdPermission` / `rateLimitBucket` in the route's `config` object (see Decorators below).
-2. **Services** (`src/modules/<group>/*.service.ts`) — own business rules. The auth module is the most-built-out example; other modules currently inline simple logic into the route file.
-3. **Repositories** (`src/db/repositories/*.ts`) — own SQL via Kysely. They also contain the `rowTo<Entity>` mappers that translate `BINARY(16)` Buffers → UUID strings and `Date` → ISO-8601 strings on the way out.
+1. **Routes** (`src/modules/<group>/*.routes.ts`) - Zod-validate input via `parseBody`/`parseParams`/`parseQuery`, call services, format the response. Declare `requiresAuth` / `requiresHouseholdPermission` / `rateLimitBucket` in the route's `config` object (see Decorators below).
+2. **Services** (`src/modules/<group>/*.service.ts`) - own business rules. The auth module is the most-built-out example; other modules currently inline simple logic into the route file.
+3. **Repositories** (`src/db/repositories/*.ts`) - own SQL via Kysely. They also contain the `rowTo<Entity>` mappers that translate `BINARY(16)` Buffers → UUID strings and `Date` → ISO-8601 strings on the way out.
 
 `src/app.ts` is the pure factory (registers plugins, hooks, routes, returns the Fastify instance). `src/server.ts` is the entrypoint that calls `listen()` and wires graceful shutdown. Tests can `buildApp()` and use Fastify's `.inject()` without binding a port.
 
@@ -45,7 +45,7 @@ Strict three-layer split — **do not** put SQL in route handlers or business ru
 
 `types/` is **declaration-only** and lint-enforced (`.eslintrc.cjs` overrides):
 - `types/` may not import runtime code from `src/` (or via the `@/*` alias).
-- `types/` may only `export type` — no values, classes, or default exports.
+- `types/` may only `export type` - no values, classes, or default exports.
 
 This guarantees the type contract can be published independently (e.g. as `@chore-club/api-types`) without leaking server code. Path aliases: `@/*` → `src/*`, `@/types/*` → `types/*` (configured in both `tsconfig.json` and `vitest.config.ts`).
 
@@ -53,14 +53,14 @@ This guarantees the type contract can be published independently (e.g. as `@chor
 
 - All public IDs are **UUIDv7** strings on the wire; stored as `BINARY(16)`. Generate with `newUuid()`, convert with `uuidToBin()` / `binToUuid()` from `src/lib/ids.ts`. Never round-trip through canonical strings inside a query.
 - All timestamps are ISO-8601 ms-precision UTC on the wire; `DATETIME(3)` at rest.
-- All public JSON is `camelCase`; SQL columns are `snake_case` — repositories handle the mapping. Don't mix the two in a single shape.
+- All public JSON is `camelCase`; SQL columns are `snake_case` - repositories handle the mapping. Don't mix the two in a single shape.
 
 ### Authentication and authorization
 
-Two orthogonal models — keep them straight:
+Two orthogonal models - keep them straight:
 
-- **Auth** (`src/middleware/auth.ts`) — verifies an HS256 access JWT (15-min TTL), populates `req.appCtx.user = { id, refreshFamilyId }`. Refresh tokens are opaque 32-byte strings, 30-day TTL, hashed (SHA-256) at rest, rotated on every use. Replaying a revoked token revokes the entire family and writes an `auth.refresh.replay_detected` audit row.
-- **Authorization** (`src/middleware/authorize.ts`) — gates household-scoped routes. Permission rank is `owner > admin > member` (see `RANK` map). On match it loads `household_members` and attaches the resolved member to `req.appCtx.member`.
+- **Auth** (`src/middleware/auth.ts`) - verifies an HS256 access JWT (15-min TTL), populates `req.appCtx.user = { id, refreshFamilyId }`. Refresh tokens are opaque 32-byte strings, 30-day TTL, hashed (SHA-256) at rest, rotated on every use. Replaying a revoked token revokes the entire family and writes an `auth.refresh.replay_detected` audit row.
+- **Authorization** (`src/middleware/authorize.ts`) - gates household-scoped routes. Permission rank is `owner > admin > member` (see `RANK` map). On match it loads `household_members` and attaches the resolved member to `req.appCtx.member`.
 
 Routes opt in to both via the route `config` object. Example pattern (every household-scoped handler should look like this):
 
@@ -72,11 +72,11 @@ app.post(
 );
 ```
 
-`test/permission-coverage.test.ts` scans every `*.routes.ts` and fails CI if a route containing `:householdId` is missing either `requiresAuth: true` or `requiresHouseholdPermission`. The single allowlisted exception (`/invites/redeem`) is documented inline. **If you add a household-scoped route, put both decorators on it inline in the same `app.<verb>(...)` call** — the regex-based scan only matches single-call literals.
+`test/permission-coverage.test.ts` scans every `*.routes.ts` and fails CI if a route containing `:householdId` is missing either `requiresAuth: true` or `requiresHouseholdPermission`. The single allowlisted exception (`/invites/redeem`) is documented inline. **If you add a household-scoped route, put both decorators on it inline in the same `app.<verb>(...)` call** - the regex-based scan only matches single-call literals.
 
 ### Errors
 
-Every thrown error in handlers must be an `AppError` subclass from `src/lib/errors.ts` (`ValidationError`, `AuthError`, `ForbiddenError`, `NotFoundError`, `ConflictError`, `RateLimitError`). The handler in `src/middleware/errorHandler.ts` shapes them into RFC 7807 `application/problem+json` with stable `code` strings (e.g. `concurrency.row_version_stale`, `household.not_a_member`). Anything not an `AppError` or `ZodError` is logged and re-shaped as a generic 500 — never leaks stack frames.
+Every thrown error in handlers must be an `AppError` subclass from `src/lib/errors.ts` (`ValidationError`, `AuthError`, `ForbiddenError`, `NotFoundError`, `ConflictError`, `RateLimitError`). The handler in `src/middleware/errorHandler.ts` shapes them into RFC 7807 `application/problem+json` with stable `code` strings (e.g. `concurrency.row_version_stale`, `household.not_a_member`). Anything not an `AppError` or `ZodError` is logged and re-shaped as a generic 500 - never leaks stack frames.
 
 ### Optimistic concurrency
 
@@ -92,7 +92,7 @@ Each household has a synthetic version computed as the max `row_version` across 
 
 ### Idempotency
 
-Side-effecting POSTs (`/completions`, `/invites`, `/auth/google`, `/auth/apple`) accept `Idempotency-Key: <UUIDv4>` (24h TTL, keyed on user + key + sha256(method+path+body)). Reuse with a *different* request body for the same key → 409 `idempotency.key_reused`. Implementation lives in `src/middleware/idempotency.ts` — call `lookup()` early, run the side effect, call `record()` after. Unauthenticated callers cannot use idempotency in v1.
+Side-effecting POSTs (`/completions`, `/invites`, `/auth/google`, `/auth/apple`) accept `Idempotency-Key: <UUIDv4>` (24h TTL, keyed on user + key + sha256(method+path+body)). Reuse with a *different* request body for the same key → 409 `idempotency.key_reused`. Implementation lives in `src/middleware/idempotency.ts` - call `lookup()` early, run the side effect, call `record()` after. Unauthenticated callers cannot use idempotency in v1.
 
 ### Rate limiting
 
@@ -100,7 +100,7 @@ Side-effecting POSTs (`/completions`, `/invites`, `/auth/google`, `/auth/apple`)
 
 ### Migrations
 
-`src/db/migrate.ts` reads `src/db/migrations/NNNN_*.sql` in lex order and runs anything not yet recorded in `schema_migrations`. **MySQL implicit-commits DDL**, so a transactional rollback isn't possible — keep migrations small and additive. Never edit an applied migration; add a new one. Filenames use a 4-digit prefix.
+`src/db/migrate.ts` reads `src/db/migrations/NNNN_*.sql` in lex order and runs anything not yet recorded in `schema_migrations`. **MySQL implicit-commits DDL**, so a transactional rollback isn't possible - keep migrations small and additive. Never edit an applied migration; add a new one. Filenames use a 4-digit prefix.
 
 ### Constants worth knowing
 

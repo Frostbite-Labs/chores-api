@@ -1,7 +1,7 @@
 /**
  * Per-route rate limiting (spec §6.4). Registered globally with the
  * unauthenticated default; each route opts into a stricter bucket via
- * `config.rateLimit` — set by an `onRoute` hook that translates our
+ * `config.rateLimit` - set by an `onRoute` hook that translates our
  * domain-level `rateLimitBucket` field into `@fastify/rate-limit`'s shape.
  */
 import type { FastifyInstance, FastifyRequest } from 'fastify';

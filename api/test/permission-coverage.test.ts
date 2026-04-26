@@ -1,5 +1,5 @@
 /**
- * Spec §5.3 — every household-scoped route must declare a
+ * Spec §5.3 - every household-scoped route must declare a
  * `requiresHouseholdPermission` decorator. Rather than booting the app, this
  * test scans the route source files and asserts that each
  * `app.<verb>('/households/:householdId/...'` registration carries the
@@ -8,7 +8,7 @@
  * The scan is intentionally simple: it pairs each route literal with the
  * adjacent `config: { ... }` block in the same call. If a registration
  * splits across many lines or doesn't have an inline config, this test
- * will flag it — that's the desired behaviour.
+ * will flag it - that's the desired behaviour.
  */
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -20,7 +20,7 @@ const MODULES_DIR = path.resolve(__dirname, '../src/modules');
 
 /** Routes that *intentionally* are not household-scoped even though they touch household state. */
 const ALLOWLIST = new Set([
-  '/invites/redeem', // POST — the redeemer doesn't know the household yet (spec §8.5).
+  '/invites/redeem', // POST - the redeemer doesn't know the household yet (spec §8.5).
 ]);
 
 const VERB_REGEX = /app\.(get|post|patch|delete)\(\s*['"`]([^'"`]+)['"`]\s*,\s*({[\s\S]*?})\s*,/g;
@@ -39,10 +39,10 @@ describe('permission decorator coverage', () => {
         const isHouseholdScoped = urlPath.includes(':householdId');
         if (!isHouseholdScoped) continue;
         if (!/requiresHouseholdPermission\s*:/.test(optsBlock)) {
-          issues.push(`${path.relative(MODULES_DIR, file)} — ${verb.toUpperCase()} ${urlPath} missing requiresHouseholdPermission`);
+          issues.push(`${path.relative(MODULES_DIR, file)} - ${verb.toUpperCase()} ${urlPath} missing requiresHouseholdPermission`);
         }
         if (!/requiresAuth\s*:\s*true/.test(optsBlock)) {
-          issues.push(`${path.relative(MODULES_DIR, file)} — ${verb.toUpperCase()} ${urlPath} missing requiresAuth:true`);
+          issues.push(`${path.relative(MODULES_DIR, file)} - ${verb.toUpperCase()} ${urlPath} missing requiresAuth:true`);
         }
       }
     }

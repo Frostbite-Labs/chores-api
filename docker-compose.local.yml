@@ -1,4 +1,4 @@
-# Local development stack — API + MySQL + Redis.
+# Local development stack - API + MySQL + Redis.
 #
 # Usage:
 #   docker compose -f docker-compose.local.yml up --build

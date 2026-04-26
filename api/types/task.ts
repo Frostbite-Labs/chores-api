@@ -2,7 +2,7 @@
  * Tasks and recurrence. Spec §8.6, §10.7.
  *
  * Field shape mirrors the existing client `TaskRecord` so the server response
- * can drop straight into the client's `HouseholdState.tasks` (spec §1 — "client
+ * can drop straight into the client's `HouseholdState.tasks` (spec §1 - "client
  * data model is backwards-compatible").
  */
 import type { IsoTimestamp, Uuid } from './api.js';

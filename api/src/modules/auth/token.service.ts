@@ -169,7 +169,7 @@ export async function rotateRefreshToken(presented: string, ctx: { ipAddress?: s
   });
 }
 
-/** Revoke every token in a family — used on logout. */
+/** Revoke every token in a family - used on logout. */
 export async function revokeFamily(familyId: string): Promise<void> {
   await getDb()
     .updateTable('refresh_tokens')
@@ -179,7 +179,7 @@ export async function revokeFamily(familyId: string): Promise<void> {
     .execute();
 }
 
-/** Revoke every family for a user — used on logout-all and account deletion. */
+/** Revoke every family for a user - used on logout-all and account deletion. */
 export async function revokeAllForUser(userId: string): Promise<void> {
   await getDb()
     .updateTable('refresh_tokens')

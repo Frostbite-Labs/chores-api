@@ -2,7 +2,7 @@
  * `/v1/households/*` routes. Spec §8.3.
  *
  * On `POST /households` the caller becomes both `owner` permission and a
- * member with their stored display_name/avatar — atomic transaction.
+ * member with their stored display_name/avatar - atomic transaction.
  */
 import type { FastifyInstance } from 'fastify';
 import { parseBody, parseParams } from '@/middleware/validate.js';
@@ -23,7 +23,7 @@ import { rowToHousehold, rowToMember, bumpHouseholdVersion } from '@/db/reposito
 const householdParamsSchema = z.object({ householdId: uuidSchema });
 
 export async function registerHouseholdsRoutes(app: FastifyInstance): Promise<void> {
-  // POST /households — 🔒
+  // POST /households - 🔒
   app.post(
     '/households',
     { config: { requiresAuth: true, rateLimitBucket: 'authedDefault' } },
@@ -88,7 +88,7 @@ export async function registerHouseholdsRoutes(app: FastifyInstance): Promise<vo
     },
   );
 
-  // GET /households/:id — 🔒 + member
+  // GET /households/:id - 🔒 + member
   app.get(
     '/households/:householdId',
     { config: { requiresAuth: true, requiresHouseholdPermission: 'member', rateLimitBucket: 'authedDefault' } },
@@ -107,7 +107,7 @@ export async function registerHouseholdsRoutes(app: FastifyInstance): Promise<vo
     },
   );
 
-  // PATCH /households/:id — 🔒 + admin
+  // PATCH /households/:id - 🔒 + admin
   app.patch(
     '/households/:householdId',
     { config: { requiresAuth: true, requiresHouseholdPermission: 'admin', rateLimitBucket: 'writeHotPath' } },
@@ -163,7 +163,7 @@ export async function registerHouseholdsRoutes(app: FastifyInstance): Promise<vo
     },
   );
 
-  // POST /households/:id/transfer-ownership — 🔒 + owner
+  // POST /households/:id/transfer-ownership - 🔒 + owner
   app.post(
     '/households/:householdId/transfer-ownership',
     { config: { requiresAuth: true, requiresHouseholdPermission: 'owner', rateLimitBucket: 'authedDefault' } },
@@ -227,7 +227,7 @@ export async function registerHouseholdsRoutes(app: FastifyInstance): Promise<vo
     },
   );
 
-  // DELETE /households/:id — 🔒 + owner
+  // DELETE /households/:id - 🔒 + owner
   app.delete(
     '/households/:householdId',
     { config: { requiresAuth: true, requiresHouseholdPermission: 'owner', rateLimitBucket: 'authedDefault' } },

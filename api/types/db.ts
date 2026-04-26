@@ -1,5 +1,5 @@
 /**
- * Kysely DB schema interface. Each table is shaped for `mysql2` round-trips —
+ * Kysely DB schema interface. Each table is shaped for `mysql2` round-trips -
  * BINARY(16) ids stay as `Buffer`, DATETIME(3) values stay as `Date`, ENUMs
  * are string literal unions. Repositories convert to/from API shapes.
  *

@@ -30,7 +30,7 @@ let cached: Env | null = null;
 
 /**
  * Read and validate `process.env` once. Subsequent calls return the cached value.
- * @throws ZodError when validation fails — propagates to the entrypoint as a fatal exit.
+ * @throws ZodError when validation fails - propagates to the entrypoint as a fatal exit.
  */
 export function loadEnv(): Env {
   if (cached) return cached;

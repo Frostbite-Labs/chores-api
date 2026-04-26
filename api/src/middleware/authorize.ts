@@ -9,7 +9,7 @@
  * It also attaches the resolved member to `req.appCtx.member` so handlers
  * don't need to re-query.
  *
- * Spec §5.3 — and the "missing decorators fail closed in CI" rule is enforced
+ * Spec §5.3 - and the "missing decorators fail closed in CI" rule is enforced
  * by `test/permission-coverage.test.ts`.
  */
 import type { FastifyInstance, FastifyRequest } from 'fastify';

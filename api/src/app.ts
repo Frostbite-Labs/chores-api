@@ -1,11 +1,11 @@
 /**
- * Builds the Fastify instance: plugins, hooks, routes. Pure factory — no
+ * Builds the Fastify instance: plugins, hooks, routes. Pure factory - no
  * `listen()` here, so tests can supply their own port (or none, with `inject`).
  */
 import Fastify, { type FastifyInstance } from 'fastify';
 import helmet from '@fastify/helmet';
 import sensible from '@fastify/sensible';
-import './middleware/types.js'; // side-effect import — loads FastifyRequest augmentation
+import './middleware/types.js'; // side-effect import - loads FastifyRequest augmentation
 import { loadEnv } from './config/env.js';
 import { getPool } from './db/pool.js';
 import { getRedis } from './lib/redis.js';
@@ -61,7 +61,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   registerAuthorizeHook(app);
   await registerRateLimit(app);
 
-  // Health endpoint — outside /v1.
+  // Health endpoint - outside /v1.
   app.get('/healthz', async (_req, reply) => {
     const start = Date.now();
     try {

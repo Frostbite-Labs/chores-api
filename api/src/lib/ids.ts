@@ -1,6 +1,6 @@
 /**
  * UUIDv7 generation + lossless conversion between the canonical string form
- * and `BINARY(16)` storage. Spec §4 — "all identifiers in URLs are UUIDv7".
+ * and `BINARY(16)` storage. Spec §4 - "all identifiers in URLs are UUIDv7".
  *
  * Why v7: time-ordered, so InnoDB primary-key inserts stay monotonic and pages
  * don't fragment the way v4 inserts do. We implement v7 inline because the

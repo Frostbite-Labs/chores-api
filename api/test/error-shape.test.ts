@@ -1,5 +1,5 @@
 /**
- * Spec §4 — every error response is RFC 7807 application/problem+json with the
+ * Spec §4 - every error response is RFC 7807 application/problem+json with the
  * required fields. Hits the not-found handler to keep the test free of DB deps.
  */
 import { describe, expect, it, vi } from 'vitest';

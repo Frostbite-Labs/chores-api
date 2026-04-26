@@ -28,7 +28,7 @@ const taskParamsSchema = z.object({ householdId: uuidSchema, taskId: uuidSchema 
 const completionParamsSchema = z.object({ householdId: uuidSchema, completionId: uuidSchema });
 
 export async function registerCompletionsRoutes(app: FastifyInstance): Promise<void> {
-  // POST /tasks/:taskId/completions — 🔒 + member (admin if memberId !== self)
+  // POST /tasks/:taskId/completions - 🔒 + member (admin if memberId !== self)
   app.post(
     '/households/:householdId/tasks/:taskId/completions',
     { config: { requiresAuth: true, requiresHouseholdPermission: 'member', rateLimitBucket: 'writeHotPath' } },
@@ -78,7 +78,7 @@ export async function registerCompletionsRoutes(app: FastifyInstance): Promise<v
 
         // Standalone members: completed_by_user_id captures the actor; if the
         // member is account-backed and the actor is that user, both fields point
-        // at the same user — that's intentional (audit trail).
+        // at the same user - that's intentional (audit trail).
         await tx
           .insertInto('task_completions')
           .values({
@@ -135,7 +135,7 @@ export async function registerCompletionsRoutes(app: FastifyInstance): Promise<v
     },
   );
 
-  // GET /completions — 🔒 + member, cursor pagination over (completed_at, id).
+  // GET /completions - 🔒 + member, cursor pagination over (completed_at, id).
   app.get(
     '/households/:householdId/completions',
     { config: { requiresAuth: true, requiresHouseholdPermission: 'member', rateLimitBucket: 'authedDefault' } },
@@ -187,7 +187,7 @@ export async function registerCompletionsRoutes(app: FastifyInstance): Promise<v
     },
   );
 
-  // DELETE /completions/:completionId — 🔒 + admin (hard delete; recompute next_due_at).
+  // DELETE /completions/:completionId - 🔒 + admin (hard delete; recompute next_due_at).
   app.delete(
     '/households/:householdId/completions/:completionId',
     { config: { requiresAuth: true, requiresHouseholdPermission: 'admin', rateLimitBucket: 'writeHotPath' } },
