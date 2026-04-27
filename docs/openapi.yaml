@@ -1,0 +1,3402 @@
+openapi: 3.0.3
+info:
+  title: Chore Club API
+  description: >-
+    Multi-user, multi-household, multi-device chore tracker. RFC 7807 errors, `If-Match` optimistic concurrency on
+    aggregate roots, `Idempotency-Key` on side-effecting hot-path POSTs, and a delta-sync protocol on `/sync`.
+    Authoritative spec: `docs/api-spec.md`.
+  version: 0.1.0
+servers:
+  - url: http://localhost:3000
+    description: Local docker-compose stack.
+  - url: https://api.choreclub.app
+    description: Production.
+tags:
+  - name: health
+    description: Liveness + dependency probe.
+  - name: auth
+    description: Sign-in (Google / Apple), refresh rotation, logout, account closure.
+  - name: me
+    description: Authenticated user profile + memberships.
+  - name: households
+    description: Household aggregate root.
+  - name: members
+    description: Household members (account-backed and standalone).
+  - name: invites
+    description: Invite codes and redemption.
+  - name: tasks
+    description: Task CRUD.
+  - name: completions
+    description: Completion log (append-only on the hot path).
+  - name: leaderboard
+    description: Monthly scoring.
+  - name: sync
+    description: Pull-delta + push-batch sync protocol.
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: HS256 access token issued by `/v1/auth/google` or `/v1/auth/apple`. 15-min TTL.
+  schemas:
+    Uuid:
+      type: string
+      format: uuid
+      description: UUIDv7 string.
+    IsoTimestamp:
+      type: string
+      format: date-time
+      description: ISO-8601 UTC, ms precision.
+    RowVersion:
+      type: integer
+      minimum: 0
+      description: Optimistic concurrency token (BIGINT UNSIGNED).
+    ProblemDetails:
+      type: object
+      description: RFC 7807 problem+json body. Returned for every error.
+      required:
+        - type
+        - title
+        - status
+        - detail
+        - instance
+        - code
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+        code:
+          type: string
+          description: Stable machine-readable code, e.g. `household.not_a_member`.
+        errors:
+          description: Optional structured payload (validation issues, conflict snapshot, etc.).
+    User:
+      type: object
+      required:
+        - id
+        - email
+        - emailVerified
+        - displayName
+        - avatar
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        email:
+          type: string
+          format: email
+          nullable: true
+        emailVerified:
+          type: boolean
+        displayName:
+          type: string
+          maxLength: 80
+        avatar:
+          type: string
+          maxLength: 16
+        createdAt:
+          $ref: '#/components/schemas/IsoTimestamp'
+        updatedAt:
+          $ref: '#/components/schemas/IsoTimestamp'
+    MeResponse:
+      allOf:
+        - $ref: '#/components/schemas/User'
+        - type: object
+          required:
+            - linkedProviders
+          properties:
+            linkedProviders:
+              type: array
+              items:
+                type: string
+                enum:
+                  - google
+                  - apple
+    HouseholdRole:
+      type: string
+      enum:
+        - adult
+        - child
+    HouseholdPermission:
+      type: string
+      enum:
+        - owner
+        - admin
+        - member
+    TaskAudience:
+      type: string
+      enum:
+        - adults
+        - children
+        - everyone
+    RecurrencePreset:
+      type: string
+      enum:
+        - hourly
+        - daily
+        - weekly
+        - monthly
+        - custom
+    RecurrenceUnit:
+      type: string
+      enum:
+        - hours
+        - days
+        - weeks
+        - months
+    RecurrenceRule:
+      type: object
+      required:
+        - preset
+        - unit
+        - interval
+      properties:
+        preset:
+          $ref: '#/components/schemas/RecurrencePreset'
+        unit:
+          $ref: '#/components/schemas/RecurrenceUnit'
+        interval:
+          type: integer
+          minimum: 1
+          maximum: 10000
+    Household:
+      type: object
+      required:
+        - id
+        - name
+        - ownerUserId
+        - rowVersion
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        name:
+          type: string
+          maxLength: 80
+        ownerUserId:
+          $ref: '#/components/schemas/Uuid'
+        rowVersion:
+          $ref: '#/components/schemas/RowVersion'
+        createdAt:
+          $ref: '#/components/schemas/IsoTimestamp'
+        updatedAt:
+          $ref: '#/components/schemas/IsoTimestamp'
+    HouseholdMember:
+      type: object
+      required:
+        - id
+        - householdId
+        - userId
+        - role
+        - permission
+        - displayName
+        - avatar
+        - color
+        - joinedAt
+        - removedAt
+        - rowVersion
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        householdId:
+          $ref: '#/components/schemas/Uuid'
+        userId:
+          $ref: '#/components/schemas/Uuid'
+          nullable: true
+          description: Null for standalone (non-account-backed) members.
+        role:
+          $ref: '#/components/schemas/HouseholdRole'
+        permission:
+          $ref: '#/components/schemas/HouseholdPermission'
+        displayName:
+          type: string
+          maxLength: 80
+        avatar:
+          type: string
+          maxLength: 16
+        color:
+          type: string
+          pattern: ^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$
+        joinedAt:
+          $ref: '#/components/schemas/IsoTimestamp'
+        removedAt:
+          $ref: '#/components/schemas/IsoTimestamp'
+          nullable: true
+        rowVersion:
+          $ref: '#/components/schemas/RowVersion'
+    Task:
+      type: object
+      required:
+        - id
+        - householdId
+        - title
+        - icon
+        - notes
+        - audience
+        - points
+        - recurrence
+        - nextDueAt
+        - createdByUserId
+        - rowVersion
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        householdId:
+          $ref: '#/components/schemas/Uuid'
+        title:
+          type: string
+          maxLength: 120
+        icon:
+          type: string
+          maxLength: 16
+        notes:
+          type: string
+          maxLength: 1000
+          nullable: true
+        audience:
+          $ref: '#/components/schemas/TaskAudience'
+        points:
+          type: integer
+          minimum: 0
+          maximum: 1000000
+        recurrence:
+          $ref: '#/components/schemas/RecurrenceRule'
+        nextDueAt:
+          $ref: '#/components/schemas/IsoTimestamp'
+        createdByUserId:
+          $ref: '#/components/schemas/Uuid'
+        rowVersion:
+          $ref: '#/components/schemas/RowVersion'
+        createdAt:
+          $ref: '#/components/schemas/IsoTimestamp'
+        updatedAt:
+          $ref: '#/components/schemas/IsoTimestamp'
+    TaskCompletion:
+      type: object
+      required:
+        - id
+        - householdId
+        - taskId
+        - memberId
+        - completedByUserId
+        - completedAt
+        - pointsAwarded
+        - taskTitleSnapshot
+        - taskIconSnapshot
+        - rowVersion
+        - createdAt
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        householdId:
+          $ref: '#/components/schemas/Uuid'
+        taskId:
+          $ref: '#/components/schemas/Uuid'
+        memberId:
+          $ref: '#/components/schemas/Uuid'
+        completedByUserId:
+          $ref: '#/components/schemas/Uuid'
+          nullable: true
+        completedAt:
+          $ref: '#/components/schemas/IsoTimestamp'
+        pointsAwarded:
+          type: integer
+          minimum: 0
+        taskTitleSnapshot:
+          type: string
+        taskIconSnapshot:
+          type: string
+        rowVersion:
+          $ref: '#/components/schemas/RowVersion'
+        createdAt:
+          $ref: '#/components/schemas/IsoTimestamp'
+    HouseholdInvite:
+      type: object
+      required:
+        - id
+        - householdId
+        - invitedEmail
+        - invitedRole
+        - invitedPermission
+        - createdByUserId
+        - maxUses
+        - usedCount
+        - expiresAt
+        - revokedAt
+        - createdAt
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        householdId:
+          $ref: '#/components/schemas/Uuid'
+        invitedEmail:
+          type: string
+          format: email
+          nullable: true
+        invitedRole:
+          $ref: '#/components/schemas/HouseholdRole'
+        invitedPermission:
+          type: string
+          enum:
+            - admin
+            - member
+        createdByUserId:
+          $ref: '#/components/schemas/Uuid'
+        maxUses:
+          type: integer
+          minimum: 1
+        usedCount:
+          type: integer
+          minimum: 0
+        expiresAt:
+          $ref: '#/components/schemas/IsoTimestamp'
+        revokedAt:
+          $ref: '#/components/schemas/IsoTimestamp'
+          nullable: true
+        createdAt:
+          $ref: '#/components/schemas/IsoTimestamp'
+    HouseholdInviteWithCode:
+      type: object
+      required:
+        - invite
+        - code
+      properties:
+        invite:
+          $ref: '#/components/schemas/HouseholdInvite'
+        code:
+          type: string
+          minLength: 8
+          maxLength: 8
+          description: Plaintext invite code — returned exactly once at creation.
+    InviteRedemption:
+      type: object
+      required:
+        - household
+        - member
+      properties:
+        household:
+          $ref: '#/components/schemas/Household'
+        member:
+          $ref: '#/components/schemas/HouseholdMember'
+    LeaderboardEntry:
+      type: object
+      required:
+        - memberId
+        - displayName
+        - avatar
+        - points
+        - completions
+        - rank
+      properties:
+        memberId:
+          $ref: '#/components/schemas/Uuid'
+        displayName:
+          type: string
+        avatar:
+          type: string
+        points:
+          type: integer
+          minimum: 0
+        completions:
+          type: integer
+          minimum: 0
+        rank:
+          type: integer
+          minimum: 1
+    HouseholdSummary:
+      type: object
+      required:
+        - id
+        - name
+        - ownerUserId
+        - rowVersion
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        name:
+          type: string
+        ownerUserId:
+          $ref: '#/components/schemas/Uuid'
+        rowVersion:
+          $ref: '#/components/schemas/RowVersion'
+    MyHouseholdEntry:
+      type: object
+      required:
+        - household
+        - memberId
+        - role
+        - permission
+      properties:
+        household:
+          $ref: '#/components/schemas/HouseholdSummary'
+        memberId:
+          $ref: '#/components/schemas/Uuid'
+        role:
+          $ref: '#/components/schemas/HouseholdRole'
+        permission:
+          $ref: '#/components/schemas/HouseholdPermission'
+    SessionResponse:
+      type: object
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+        accessTokenExpiresAt:
+          type: string
+        user:
+          type: object
+          properties:
+            id:
+              type: string
+            email:
+              type: string
+              nullable: true
+            emailVerified:
+              type: boolean
+            displayName:
+              type: string
+            avatar:
+              type: string
+            createdAt:
+              type: string
+            updatedAt:
+              type: string
+          required:
+            - id
+            - email
+            - emailVerified
+            - displayName
+            - avatar
+            - createdAt
+            - updatedAt
+          additionalProperties: false
+      required:
+        - accessToken
+        - refreshToken
+        - accessTokenExpiresAt
+        - user
+      additionalProperties: false
+    AppleNonceResponse:
+      type: object
+      properties:
+        nonce:
+          type: string
+        expiresAt:
+          type: string
+      required:
+        - nonce
+        - expiresAt
+      additionalProperties: false
+    RefreshResponse:
+      type: object
+      required:
+        - accessToken
+        - refreshToken
+        - accessTokenExpiresAt
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+        accessTokenExpiresAt:
+          $ref: '#/components/schemas/IsoTimestamp'
+    HouseholdCreateResponse:
+      type: object
+      required:
+        - household
+        - member
+      properties:
+        household:
+          $ref: '#/components/schemas/Household'
+        member:
+          $ref: '#/components/schemas/HouseholdMember'
+    CompletionCreateResponse:
+      type: object
+      required:
+        - completion
+        - task
+      properties:
+        completion:
+          $ref: '#/components/schemas/TaskCompletion'
+        task:
+          $ref: '#/components/schemas/Task'
+    SyncDelta:
+      type: object
+      required:
+        - rowVersion
+        - members
+        - tasks
+        - completions
+        - hasMore
+      properties:
+        rowVersion:
+          $ref: '#/components/schemas/RowVersion'
+        household:
+          $ref: '#/components/schemas/Household'
+          description: Present iff the household row itself bumped past `since`.
+        members:
+          type: object
+          required:
+            - upserted
+            - deleted
+          properties:
+            upserted:
+              type: array
+              items:
+                $ref: '#/components/schemas/HouseholdMember'
+            deleted:
+              type: array
+              items:
+                $ref: '#/components/schemas/Uuid'
+        tasks:
+          type: object
+          required:
+            - upserted
+            - deleted
+          properties:
+            upserted:
+              type: array
+              items:
+                $ref: '#/components/schemas/Task'
+            deleted:
+              type: array
+              items:
+                $ref: '#/components/schemas/Uuid'
+        completions:
+          type: object
+          required:
+            - upserted
+            - deleted
+          properties:
+            upserted:
+              type: array
+              items:
+                $ref: '#/components/schemas/TaskCompletion'
+            deleted:
+              type: array
+              items:
+                $ref: '#/components/schemas/Uuid'
+        hasMore:
+          type: boolean
+        nextSince:
+          $ref: '#/components/schemas/RowVersion'
+          description: Present iff `hasMore`. Pass back as `?since=`.
+    SyncPushResult:
+      type: object
+      required:
+        - clientId
+        - status
+      properties:
+        clientId:
+          type: string
+        status:
+          type: string
+          enum:
+            - applied
+            - conflict
+            - rejected
+        serverId:
+          $ref: '#/components/schemas/Uuid'
+        rowVersion:
+          $ref: '#/components/schemas/RowVersion'
+        code:
+          type: string
+          description: Stable error code on conflict/rejected.
+        current:
+          description: On conflict, the fresh server-side entity (Task | HouseholdMember | Household | TaskCompletion).
+    SyncPushResponse:
+      type: object
+      required:
+        - results
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SyncPushResult'
+    GoogleSignInBody:
+      type: object
+      properties:
+        idToken:
+          type: string
+          minLength: 20
+        deviceLabel:
+          type: string
+          maxLength: 120
+      required:
+        - idToken
+      additionalProperties: false
+    AppleSignInBody:
+      type: object
+      properties:
+        identityToken:
+          type: string
+          minLength: 20
+        nonce:
+          type: string
+          minLength: 8
+        deviceLabel:
+          type: string
+          maxLength: 120
+      required:
+        - identityToken
+        - nonce
+      additionalProperties: false
+    RefreshBody:
+      type: object
+      properties:
+        refreshToken:
+          type: string
+          minLength: 20
+      required:
+        - refreshToken
+      additionalProperties: false
+    PatchMeBody:
+      type: object
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 80
+        avatar:
+          type: string
+          maxLength: 16
+      additionalProperties: false
+    CreateHouseholdBody:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+      required:
+        - name
+      additionalProperties: false
+    RenameHouseholdBody:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+      additionalProperties: false
+    TransferOwnershipBody:
+      type: object
+      properties:
+        toMemberId:
+          type: string
+      required:
+        - toMemberId
+      additionalProperties: false
+    CreateMemberBody:
+      type: object
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 80
+        avatar:
+          type: string
+          maxLength: 16
+        role:
+          type: string
+          enum:
+            - adult
+            - child
+        color:
+          type: string
+          pattern: ^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$
+      required:
+        - displayName
+        - avatar
+        - role
+      additionalProperties: false
+    PatchMemberBody:
+      type: object
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 80
+        avatar:
+          type: string
+          maxLength: 16
+        role:
+          type: string
+          enum:
+            - adult
+            - child
+        permission:
+          type: string
+          enum:
+            - owner
+            - admin
+            - member
+        color:
+          type: string
+          pattern: ^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$
+      additionalProperties: false
+    CreateInviteBody:
+      type: object
+      properties:
+        role:
+          type: string
+          enum:
+            - adult
+            - child
+        permission:
+          type: string
+          enum:
+            - admin
+            - member
+        maxUses:
+          type: integer
+          exclusiveMinimum: true
+          minimum: 0
+          maximum: 100
+        expiresInHours:
+          type: integer
+          exclusiveMinimum: true
+          minimum: 0
+          maximum: 720
+        invitedEmail:
+          type: string
+          format: email
+          maxLength: 254
+      required:
+        - role
+        - permission
+      additionalProperties: false
+    RedeemInviteBody:
+      type: object
+      properties:
+        code:
+          type: string
+          minLength: 8
+          maxLength: 8
+          pattern: ^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{8}$
+      required:
+        - code
+      additionalProperties: false
+    CreateTaskBody:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 120
+        icon:
+          type: string
+          maxLength: 16
+        notes:
+          type: string
+          maxLength: 1000
+          nullable: true
+        audience:
+          type: string
+          enum:
+            - adults
+            - children
+            - everyone
+        points:
+          type: integer
+          minimum: 0
+          maximum: 1000000
+        recurrence:
+          type: object
+          properties:
+            preset:
+              type: string
+              enum:
+                - hourly
+                - daily
+                - weekly
+                - monthly
+                - custom
+            unit:
+              type: string
+              enum:
+                - hours
+                - days
+                - weeks
+                - months
+            interval:
+              type: integer
+              exclusiveMinimum: true
+              minimum: 0
+              maximum: 10000
+          required:
+            - preset
+            - unit
+            - interval
+          additionalProperties: false
+        nextDueAt:
+          type: string
+          format: date-time
+      required:
+        - title
+        - icon
+        - audience
+        - points
+        - recurrence
+      additionalProperties: false
+    PatchTaskBody:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 120
+        icon:
+          type: string
+          maxLength: 16
+        notes:
+          type: string
+          maxLength: 1000
+          nullable: true
+        audience:
+          type: string
+          enum:
+            - adults
+            - children
+            - everyone
+        points:
+          type: integer
+          minimum: 0
+          maximum: 1000000
+        recurrence:
+          type: object
+          properties:
+            preset:
+              type: string
+              enum:
+                - hourly
+                - daily
+                - weekly
+                - monthly
+                - custom
+            unit:
+              type: string
+              enum:
+                - hours
+                - days
+                - weeks
+                - months
+            interval:
+              type: integer
+              exclusiveMinimum: true
+              minimum: 0
+              maximum: 10000
+          required:
+            - preset
+            - unit
+            - interval
+          additionalProperties: false
+        nextDueAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+    CreateCompletionBody:
+      type: object
+      properties:
+        memberId:
+          type: string
+        completedAt:
+          type: string
+          format: date-time
+      required:
+        - memberId
+      additionalProperties: false
+    SyncPushBody:
+      type: object
+      properties:
+        operations:
+          type: array
+          items:
+            anyOf:
+              - type: object
+                properties:
+                  kind:
+                    type: string
+                    enum:
+                      - task.create
+                  payload:
+                    type: object
+                    properties:
+                      title:
+                        type: string
+                        minLength: 1
+                        maxLength: 120
+                      icon:
+                        type: string
+                        minLength: 1
+                        maxLength: 16
+                      notes:
+                        type: string
+                        maxLength: 1000
+                        nullable: true
+                      audience:
+                        type: string
+                        enum:
+                          - adults
+                          - children
+                          - everyone
+                      points:
+                        type: integer
+                        minimum: 0
+                        maximum: 1000000
+                      recurrence:
+                        type: object
+                        properties:
+                          preset:
+                            type: string
+                            enum:
+                              - hourly
+                              - daily
+                              - weekly
+                              - monthly
+                              - custom
+                          unit:
+                            type: string
+                            enum:
+                              - hours
+                              - days
+                              - weeks
+                              - months
+                          interval:
+                            type: integer
+                            exclusiveMinimum: true
+                            minimum: 0
+                            maximum: 10000
+                        required:
+                          - preset
+                          - unit
+                          - interval
+                        additionalProperties: false
+                      nextDueAt:
+                        type: string
+                        format: date-time
+                    required:
+                      - title
+                      - icon
+                      - audience
+                      - points
+                      - recurrence
+                    additionalProperties: false
+                  clientId:
+                    type: string
+                    minLength: 1
+                    maxLength: 64
+                  ifMatchRowVersion:
+                    type: integer
+                    minimum: 0
+                  ifMatchTaskRowVersion:
+                    type: integer
+                    minimum: 0
+                required:
+                  - kind
+                  - payload
+                  - clientId
+                additionalProperties: false
+                description: Insert a task. Caller must hold `admin` permission.
+              - type: object
+                properties:
+                  kind:
+                    type: string
+                    enum:
+                      - task.update
+                  payload:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      patch:
+                        type: object
+                        properties:
+                          title:
+                            type: string
+                            minLength: 1
+                            maxLength: 120
+                          icon:
+                            type: string
+                            minLength: 1
+                            maxLength: 16
+                          notes:
+                            type: string
+                            maxLength: 1000
+                            nullable: true
+                          audience:
+                            type: string
+                            enum:
+                              - adults
+                              - children
+                              - everyone
+                          points:
+                            type: integer
+                            minimum: 0
+                            maximum: 1000000
+                          recurrence:
+                            type: object
+                            properties:
+                              preset:
+                                type: string
+                                enum:
+                                  - hourly
+                                  - daily
+                                  - weekly
+                                  - monthly
+                                  - custom
+                              unit:
+                                type: string
+                                enum:
+                                  - hours
+                                  - days
+                                  - weeks
+                                  - months
+                              interval:
+                                type: integer
+                                exclusiveMinimum: true
+                                minimum: 0
+                                maximum: 10000
+                            required:
+                              - preset
+                              - unit
+                              - interval
+                            additionalProperties: false
+                          nextDueAt:
+                            type: string
+                            format: date-time
+                        additionalProperties: false
+                    required:
+                      - id
+                      - patch
+                    additionalProperties: false
+                  clientId:
+                    type: string
+                    minLength: 1
+                    maxLength: 64
+                  ifMatchRowVersion:
+                    type: integer
+                    minimum: 0
+                  ifMatchTaskRowVersion:
+                    type: integer
+                    minimum: 0
+                required:
+                  - kind
+                  - payload
+                  - clientId
+                additionalProperties: false
+                description: Update a task with optimistic concurrency via `ifMatchRowVersion`. Caller must hold `admin`.
+              - type: object
+                properties:
+                  kind:
+                    type: string
+                    enum:
+                      - task.delete
+                  payload:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                    required:
+                      - id
+                    additionalProperties: false
+                  clientId:
+                    type: string
+                    minLength: 1
+                    maxLength: 64
+                  ifMatchRowVersion:
+                    type: integer
+                    minimum: 0
+                  ifMatchTaskRowVersion:
+                    type: integer
+                    minimum: 0
+                required:
+                  - kind
+                  - payload
+                  - clientId
+                additionalProperties: false
+                description: Soft-delete a task and emit a tombstone. Caller must hold `admin`.
+              - type: object
+                properties:
+                  kind:
+                    type: string
+                    enum:
+                      - completion.create
+                  payload:
+                    type: object
+                    properties:
+                      taskId:
+                        type: string
+                      memberId:
+                        type: string
+                      completedAt:
+                        type: string
+                        format: date-time
+                    required:
+                      - taskId
+                      - memberId
+                    additionalProperties: false
+                  clientId:
+                    type: string
+                    minLength: 1
+                    maxLength: 64
+                  ifMatchRowVersion:
+                    type: integer
+                    minimum: 0
+                  ifMatchTaskRowVersion:
+                    type: integer
+                    minimum: 0
+                required:
+                  - kind
+                  - payload
+                  - clientId
+                additionalProperties: false
+                description: >-
+                  Append a completion (never conflicts; advances `task.next_due_at`). `member` may record their own;
+                  `admin` required to record on behalf of another member.
+              - type: object
+                properties:
+                  kind:
+                    type: string
+                    enum:
+                      - completion.delete
+                  payload:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                    required:
+                      - id
+                    additionalProperties: false
+                  clientId:
+                    type: string
+                    minLength: 1
+                    maxLength: 64
+                  ifMatchRowVersion:
+                    type: integer
+                    minimum: 0
+                  ifMatchTaskRowVersion:
+                    type: integer
+                    minimum: 0
+                required:
+                  - kind
+                  - payload
+                  - clientId
+                additionalProperties: false
+                description: >-
+                  Hard-delete a completion. Recomputes the affected task's `next_due_at` using the same algorithm as
+                  `DELETE /completions/{completionId}` (most-recent surviving completion `+ recurrence`, or
+                  `task.created_at + recurrence` if none). Caller must hold `admin`.
+              - type: object
+                properties:
+                  kind:
+                    type: string
+                    enum:
+                      - member.create
+                  payload:
+                    type: object
+                    properties:
+                      displayName:
+                        type: string
+                        minLength: 1
+                        maxLength: 80
+                      avatar:
+                        type: string
+                        minLength: 1
+                        maxLength: 16
+                      role:
+                        type: string
+                        enum:
+                          - adult
+                          - child
+                      color:
+                        type: string
+                        pattern: ^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$
+                    required:
+                      - displayName
+                      - avatar
+                      - role
+                    additionalProperties: false
+                  clientId:
+                    type: string
+                    minLength: 1
+                    maxLength: 64
+                  ifMatchRowVersion:
+                    type: integer
+                    minimum: 0
+                  ifMatchTaskRowVersion:
+                    type: integer
+                    minimum: 0
+                required:
+                  - kind
+                  - payload
+                  - clientId
+                additionalProperties: false
+                description: Insert a standalone (non-account-backed) member. Caller must hold `admin`.
+              - type: object
+                properties:
+                  kind:
+                    type: string
+                    enum:
+                      - member.update
+                  payload:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      patch:
+                        type: object
+                        properties:
+                          displayName:
+                            type: string
+                            minLength: 1
+                            maxLength: 80
+                          avatar:
+                            type: string
+                            minLength: 1
+                            maxLength: 16
+                          role:
+                            type: string
+                            enum:
+                              - adult
+                              - child
+                          permission:
+                            type: string
+                            enum:
+                              - owner
+                              - admin
+                              - member
+                          color:
+                            type: string
+                            pattern: ^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$
+                        additionalProperties: false
+                    required:
+                      - id
+                      - patch
+                    additionalProperties: false
+                  clientId:
+                    type: string
+                    minLength: 1
+                    maxLength: 64
+                  ifMatchRowVersion:
+                    type: integer
+                    minimum: 0
+                  ifMatchTaskRowVersion:
+                    type: integer
+                    minimum: 0
+                required:
+                  - kind
+                  - payload
+                  - clientId
+                additionalProperties: false
+                description: >-
+                  Update a member with optimistic concurrency via `ifMatchRowVersion`. `admin` required; `permission`
+                  changes additionally require `owner`.
+              - type: object
+                properties:
+                  kind:
+                    type: string
+                    enum:
+                      - member.delete
+                  payload:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                    required:
+                      - id
+                    additionalProperties: false
+                  clientId:
+                    type: string
+                    minLength: 1
+                    maxLength: 64
+                  ifMatchRowVersion:
+                    type: integer
+                    minimum: 0
+                  ifMatchTaskRowVersion:
+                    type: integer
+                    minimum: 0
+                required:
+                  - kind
+                  - payload
+                  - clientId
+                additionalProperties: false
+                description: Soft-remove a member. Caller must hold `admin`. Owner cannot be removed; transfer first.
+          minItems: 1
+          maxItems: 500
+      required:
+        - operations
+      additionalProperties: false
+paths:
+  /healthz:
+    get:
+      summary: Liveness + dependency probe (MySQL + Redis ping). Outside `/v1`.
+      tags:
+        - health
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - status
+                  - elapsedMs
+                properties:
+                  status:
+                    type: string
+                    enum:
+                      - ok
+                      - slow
+                      - down
+                  elapsedMs:
+                    type: integer
+                  error:
+                    type: string
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      security: []
+      operationId: getHealthz
+  /v1/auth/apple/nonce:
+    post:
+      summary: Issue a single-use nonce for the next Apple sign-in (5-min TTL).
+      tags:
+        - auth
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppleNonceResponse'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      security: []
+      operationId: postAuthAppleNonce
+  /v1/auth/google:
+    post:
+      summary: Sign in with a Google ID token. Returns a session + user profile.
+      description: >-
+        Honours `Idempotency-Key` (24h TTL) so flaky-network retries don't duplicate refresh-token rows. Reuse with a
+        different body returns 409 `idempotency.key_reused`.
+      tags:
+        - auth
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: UUIDv4. Replay of the same key + request body returns the cached response (24h TTL).
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+        '400':
+          description: Validation failed.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: Authentication required or token invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: Conflict — stale `If-Match`, idempotency-key reuse, or domain conflict.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GoogleSignInBody'
+      security: []
+      operationId: postAuthGoogle
+  /v1/auth/apple:
+    post:
+      summary: Sign in with an Apple identity token + previously issued nonce.
+      description: >-
+        Honours `Idempotency-Key` (24h TTL) so flaky-network retries don't duplicate refresh-token rows. Reuse with a
+        different body returns 409 `idempotency.key_reused`.
+      tags:
+        - auth
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: UUIDv4. Replay of the same key + request body returns the cached response (24h TTL).
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+        '400':
+          description: Validation failed.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: Authentication required or token invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: Conflict — stale `If-Match`, idempotency-key reuse, or domain conflict.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppleSignInBody'
+      security: []
+      operationId: postAuthApple
+  /v1/auth/refresh:
+    post:
+      summary: Rotate a refresh token. Replay → 401 + family revoked.
+      tags:
+        - auth
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshResponse'
+        '400':
+          description: Validation failed.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: Authentication required or token invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshBody'
+      security: []
+      operationId: postAuthRefresh
+  /v1/auth/logout:
+    post:
+      summary: Revoke the current refresh-token family.
+      tags:
+        - auth
+      responses:
+        '204':
+          description: No content.
+        '401':
+          description: Authentication required or token invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      security:
+        - bearerAuth: []
+      operationId: postAuthLogout
+  /v1/auth/logout-all:
+    post:
+      summary: Revoke every refresh-token family for the user.
+      tags:
+        - auth
+      responses:
+        '204':
+          description: No content.
+        '401':
+          description: Authentication required or token invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      security:
+        - bearerAuth: []
+      operationId: postAuthLogoutAll
+  /v1/auth/account:
+    delete:
+      summary: Begin account deletion. Refuses if the user owns multi-member households.
+      tags:
+        - auth
+      responses:
+        '204':
+          description: No content.
+        '401':
+          description: Authentication required or token invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: Conflict — stale `If-Match`, idempotency-key reuse, or domain conflict.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      security:
+        - bearerAuth: []
+      operationId: deleteAuthAccount
+  /v1/me:
+    get:
+      summary: Current user profile + linked providers.
+      tags:
+        - me
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeResponse'
+        '401':
+          description: Authentication required or token invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      security:
+        - bearerAuth: []
+      operationId: getMe
+    patch:
+      summary: Update displayName/avatar.
+      tags:
+        - me
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeResponse'
+        '400':
+          description: Validation failed.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: Authentication required or token invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchMeBody'
+      security:
+        - bearerAuth: []
+      operationId: patchMe
+  /v1/me/households:
+    get:
+      summary: List household memberships with role + permission.
+      tags:
+        - me
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MyHouseholdEntry'
+        '401':
+          description: Authentication required or token invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      security:
+        - bearerAuth: []
+      operationId: getMeHouseholds
+  /v1/households:
+    post:
+      summary: Create a household. Caller becomes owner.
+      tags:
+        - households
+      responses:
+        '201':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HouseholdCreateResponse'
+        '400':
+          description: Validation failed.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: Authentication required or token invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateHouseholdBody'
+      security:
+        - bearerAuth: []
+      operationId: postHouseholds
+  /v1/households/{householdId}:
+    get:
+      summary: Get a household.
+      tags:
+        - households
+      parameters:
+        - name: householdId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      responses:
+        '200':
+          description: OK.
+          headers:
+            ETag:
+              schema:
+                type: string
+              description: Quoted `rowVersion`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Household'
+        '401':
+          description: Authentication required or token invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: Forbidden — auth ok, permission insufficient.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Resource not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      security:
+        - bearerAuth: []
+      x-required-household-permission: member
+      operationId: getHouseholdsByHouseholdId
+    patch:
+      summary: Rename a household. `If-Match` recommended.
+      tags:
+        - households
+      parameters:
+        - name: householdId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: If-Match
+          in: header
+          required: false
+          description: Optimistic concurrency token. Quoted `rowVersion`. Mismatch → 409 `concurrency.row_version_stale`.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          headers:
+            ETag:
+              schema:
+                type: string
+              description: Quoted `rowVersion`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Household'
+        '400':
+          description: Validation failed.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: Authentication required or token invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: Forbidden — auth ok, permission insufficient.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Resource not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: Conflict — stale `If-Match`, idempotency-key reuse, or domain conflict.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RenameHouseholdBody'
+      security:
+        - bearerAuth: []
+      x-required-household-permission: admin
+      operationId: patchHouseholdsByHouseholdId
+    delete:
+      summary: Soft-delete a household and cascade to invites + tasks.
+      tags:
+        - households
+      parameters:
+        - name: householdId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      responses:
+        '204':
+          description: No content.
+        '401':
+          description: Authentication required or token invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: Forbidden — auth ok, permission insufficient.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Resource not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      security:
+        - bearerAuth: []
+      x-required-household-permission: owner
+      operationId: deleteHouseholdsByHouseholdId
+  /v1/households/{householdId}/transfer-ownership:
+    post:
+      summary: Transfer ownership to another account-backed member. Demotes prior owner to admin.
+      tags:
+        - households
+      parameters:
+        - name: householdId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Household'
+        '400':
+          description: Validation failed.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: Authentication required or token invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: Forbidden — auth ok, permission insufficient.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Resource not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferOwnershipBody'
+      security:
+        - bearerAuth: []
+      x-required-household-permission: owner
+      operationId: postHouseholdsByHouseholdIdTransferOwnership
+  /v1/households/{householdId}/members:
+    get:
+      summary: List active members.
+      tags:
+        - members
+      parameters:
+        - name: householdId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/HouseholdMember'
+        '401':
+          description: Authentication required or token invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: Forbidden — auth ok, permission insufficient.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Resource not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      security:
+        - bearerAuth: []
+      x-required-household-permission: member
+      operationId: getHouseholdsByHouseholdIdMembers
+    post:
+      summary: Create a standalone (non-account-backed) member.
+      tags:
+        - members
+      parameters:
+        - name: householdId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      responses:
+        '201':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HouseholdMember'
+        '400':
+          description: Validation failed.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: Authentication required or token invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: Forbidden — auth ok, permission insufficient.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Resource not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMemberBody'
+      security:
+        - bearerAuth: []
+      x-required-household-permission: admin
+      operationId: postHouseholdsByHouseholdIdMembers
+  /v1/households/{householdId}/members/{memberId}:
+    patch:
+      summary: >-
+        Update a member. Members can self-edit displayName/avatar/color; role/permission edits require admin (permission
+        requires owner). `If-Match` is advisory — when supplied, mismatched row_version returns 409 with the current
+        member echoed in `errors.current`.
+      tags:
+        - members
+      parameters:
+        - name: householdId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: memberId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: If-Match
+          in: header
+          required: false
+          description: Optimistic concurrency token. Quoted `rowVersion`. Mismatch → 409 `concurrency.row_version_stale`.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          headers:
+            ETag:
+              schema:
+                type: string
+              description: Quoted `rowVersion`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HouseholdMember'
+        '400':
+          description: Validation failed.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: Authentication required or token invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: Forbidden — auth ok, permission insufficient.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Resource not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: Conflict — stale `If-Match`, idempotency-key reuse, or domain conflict.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchMemberBody'
+      security:
+        - bearerAuth: []
+      x-required-household-permission: member
+      operationId: patchHouseholdsByHouseholdIdMembersByMemberId
+    delete:
+      summary: >-
+        Soft-remove a member. A member may remove themselves (any permission); removing another member requires `admin`.
+        Owner cannot be removed via this route — transfer ownership first.
+      tags:
+        - members
+      parameters:
+        - name: householdId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: memberId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      responses:
+        '204':
+          description: No content.
+        '401':
+          description: Authentication required or token invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: Forbidden — auth ok, permission insufficient.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Resource not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: Conflict — stale `If-Match`, idempotency-key reuse, or domain conflict.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      security:
+        - bearerAuth: []
+      x-required-household-permission: member
+      operationId: deleteHouseholdsByHouseholdIdMembersByMemberId
+  /v1/households/{householdId}/invites:
+    get:
+      summary: List active invites.
+      tags:
+        - invites
+      parameters:
+        - name: householdId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/HouseholdInvite'
+        '401':
+          description: Authentication required or token invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: Forbidden — auth ok, permission insufficient.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Resource not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      security:
+        - bearerAuth: []
+      x-required-household-permission: admin
+      operationId: getHouseholdsByHouseholdIdInvites
+    post:
+      summary: Create an invite. The plaintext code is returned exactly once.
+      tags:
+        - invites
+      parameters:
+        - name: householdId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      responses:
+        '201':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HouseholdInviteWithCode'
+        '400':
+          description: Validation failed.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: Authentication required or token invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: Forbidden — auth ok, permission insufficient.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Resource not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateInviteBody'
+      security:
+        - bearerAuth: []
+      x-required-household-permission: admin
+      operationId: postHouseholdsByHouseholdIdInvites
+  /v1/households/{householdId}/invites/{inviteId}:
+    delete:
+      summary: Revoke an invite.
+      tags:
+        - invites
+      parameters:
+        - name: householdId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: inviteId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      responses:
+        '204':
+          description: No content.
+        '401':
+          description: Authentication required or token invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: Forbidden — auth ok, permission insufficient.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Resource not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      security:
+        - bearerAuth: []
+      x-required-household-permission: admin
+      operationId: deleteHouseholdsByHouseholdIdInvitesByInviteId
+  /v1/invites/redeem:
+    post:
+      summary: Redeem an invite code, joining the caller as a member.
+      tags:
+        - invites
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InviteRedemption'
+        '400':
+          description: Validation failed.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: Authentication required or token invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Resource not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: Conflict — stale `If-Match`, idempotency-key reuse, or domain conflict.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RedeemInviteBody'
+      security:
+        - bearerAuth: []
+      operationId: postInvitesRedeem
+  /v1/households/{householdId}/tasks:
+    get:
+      summary: List non-deleted tasks. Optional filters.
+      tags:
+        - tasks
+      parameters:
+        - name: householdId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: dueBefore
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: audience
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - adults
+              - children
+              - everyone
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Task'
+        '401':
+          description: Authentication required or token invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: Forbidden — auth ok, permission insufficient.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Resource not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      security:
+        - bearerAuth: []
+      x-required-household-permission: member
+      operationId: getHouseholdsByHouseholdIdTasks
+    post:
+      summary: Create a task.
+      description: >-
+        When `nextDueAt` is omitted, the server defaults to the current request time (matches the existing client
+        `toTaskRecord()` behaviour).
+      tags:
+        - tasks
+      parameters:
+        - name: householdId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      responses:
+        '201':
+          description: OK.
+          headers:
+            ETag:
+              schema:
+                type: string
+              description: Quoted `rowVersion`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400':
+          description: Validation failed.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: Authentication required or token invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: Forbidden — auth ok, permission insufficient.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Resource not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTaskBody'
+      security:
+        - bearerAuth: []
+      x-required-household-permission: admin
+      operationId: postHouseholdsByHouseholdIdTasks
+  /v1/households/{householdId}/tasks/{taskId}:
+    get:
+      summary: Get a task.
+      tags:
+        - tasks
+      parameters:
+        - name: householdId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      responses:
+        '200':
+          description: OK.
+          headers:
+            ETag:
+              schema:
+                type: string
+              description: Quoted `rowVersion`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '401':
+          description: Authentication required or token invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: Forbidden — auth ok, permission insufficient.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Resource not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      security:
+        - bearerAuth: []
+      x-required-household-permission: member
+      operationId: getHouseholdsByHouseholdIdTasksByTaskId
+    patch:
+      summary: Update a task. `If-Match` recommended.
+      tags:
+        - tasks
+      parameters:
+        - name: householdId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: If-Match
+          in: header
+          required: false
+          description: Optimistic concurrency token. Quoted `rowVersion`. Mismatch → 409 `concurrency.row_version_stale`.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          headers:
+            ETag:
+              schema:
+                type: string
+              description: Quoted `rowVersion`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400':
+          description: Validation failed.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: Authentication required or token invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: Forbidden — auth ok, permission insufficient.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Resource not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: Conflict — stale `If-Match`, idempotency-key reuse, or domain conflict.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchTaskBody'
+      security:
+        - bearerAuth: []
+      x-required-household-permission: admin
+      operationId: patchHouseholdsByHouseholdIdTasksByTaskId
+    delete:
+      summary: Soft-delete a task.
+      tags:
+        - tasks
+      parameters:
+        - name: householdId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      responses:
+        '204':
+          description: No content.
+        '401':
+          description: Authentication required or token invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: Forbidden — auth ok, permission insufficient.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Resource not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      security:
+        - bearerAuth: []
+      x-required-household-permission: admin
+      operationId: deleteHouseholdsByHouseholdIdTasksByTaskId
+  /v1/households/{householdId}/tasks/{taskId}/completions:
+    post:
+      summary: >-
+        Log a completion (advances `task.next_due_at`). `Idempotency-Key` honoured. Admin required when `memberId !==
+        self`.
+      tags:
+        - completions
+      parameters:
+        - name: householdId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: UUIDv4. Replay of the same key + request body returns the cached response (24h TTL).
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '201':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompletionCreateResponse'
+        '400':
+          description: Validation failed.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: Authentication required or token invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: Forbidden — auth ok, permission insufficient.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Resource not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: Conflict — stale `If-Match`, idempotency-key reuse, or domain conflict.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCompletionBody'
+      security:
+        - bearerAuth: []
+      x-required-household-permission: member
+      operationId: postHouseholdsByHouseholdIdTasksByTaskIdCompletions
+  /v1/households/{householdId}/completions:
+    get:
+      summary: List completions, cursor-paginated over `(completed_at desc, id desc)`.
+      tags:
+        - completions
+      parameters:
+        - name: householdId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: memberId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: taskId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Link:
+              schema:
+                type: string
+              description: RFC 5988 `Link` header with `rel="next"` cursor when more results exist.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TaskCompletion'
+        '401':
+          description: Authentication required or token invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: Forbidden — auth ok, permission insufficient.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Resource not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      security:
+        - bearerAuth: []
+      x-required-household-permission: member
+      operationId: getHouseholdsByHouseholdIdCompletions
+  /v1/households/{householdId}/completions/{completionId}:
+    delete:
+      summary: Hard-delete a completion. Recomputes the affected task `next_due_at`.
+      tags:
+        - completions
+      parameters:
+        - name: householdId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: completionId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      responses:
+        '204':
+          description: No content.
+        '401':
+          description: Authentication required or token invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: Forbidden — auth ok, permission insufficient.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Resource not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      security:
+        - bearerAuth: []
+      x-required-household-permission: admin
+      operationId: deleteHouseholdsByHouseholdIdCompletionsByCompletionId
+  /v1/households/{householdId}/leaderboard:
+    get:
+      summary: Monthly leaderboard, sorted `points DESC, completions DESC`.
+      tags:
+        - leaderboard
+      parameters:
+        - name: householdId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: month
+          in: query
+          required: false
+          schema:
+            type: string
+            pattern: ^\d{4}-\d{2}$
+        - name: tz
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 80
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LeaderboardEntry'
+        '401':
+          description: Authentication required or token invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: Forbidden — auth ok, permission insufficient.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Resource not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      security:
+        - bearerAuth: []
+      x-required-household-permission: member
+      operationId: getHouseholdsByHouseholdIdLeaderboard
+  /v1/households/{householdId}/leaderboard/previous-winner:
+    get:
+      summary: Previous month's top scorer, or `null` if there was none.
+      tags:
+        - leaderboard
+      parameters:
+        - name: householdId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: month
+          in: query
+          required: false
+          schema:
+            type: string
+            pattern: ^\d{4}-\d{2}$
+        - name: tz
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 80
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LeaderboardEntry'
+                nullable: true
+        '401':
+          description: Authentication required or token invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: Forbidden — auth ok, permission insufficient.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Resource not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      security:
+        - bearerAuth: []
+      x-required-household-permission: member
+      operationId: getHouseholdsByHouseholdIdLeaderboardPreviousWinner
+  /v1/households/{householdId}/sync:
+    get:
+      summary: Pull a delta of upserts + tombstones since `?since=<rowVersion>`. Paginated by 1MB byte budget.
+      tags:
+        - sync
+      parameters:
+        - name: householdId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: since
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncDelta'
+        '401':
+          description: Authentication required or token invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: Forbidden — auth ok, permission insufficient.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Resource not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      security:
+        - bearerAuth: []
+      x-required-household-permission: member
+      operationId: getHouseholdsByHouseholdIdSync
+    post:
+      summary: Push a batched array of operations. Per-item ack/conflict/rejected. Server-wins for non-completion conflicts.
+      description: >-
+        The route-level permission floor is `member`, but each operation `kind` re-checks permission inside the handler:
+
+
+        | `kind` | Required permission |
+
+        | --- | --- |
+
+        | `completion.create` | `member` (admin if `memberId !== self`) |
+
+        | `completion.delete` | `admin` |
+
+        | `task.create` / `task.update` / `task.delete` | `admin` |
+
+        | `member.create` / `member.update` / `member.delete` | `admin` (`permission` change requires `owner`) |
+
+
+        A single rejected op does not fail the whole push; it surfaces in `results[i]` as `status: rejected` (or
+        `conflict`) with a stable `code`. See per-variant descriptions on `SyncPushBody.operations.items`.
+      tags:
+        - sync
+      parameters:
+        - name: householdId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncPushResponse'
+        '400':
+          description: Validation failed.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: Authentication required or token invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: Forbidden — auth ok, permission insufficient.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Resource not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SyncPushBody'
+      security:
+        - bearerAuth: []
+      x-required-household-permission: member
+      operationId: postHouseholdsByHouseholdIdSync

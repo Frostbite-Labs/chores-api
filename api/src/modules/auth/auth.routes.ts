@@ -18,6 +18,7 @@ import { verifyAppleIdToken } from './apple.verifier.js';
 import { consumeAppleNonce, issueAppleNonce } from './nonce.service.js';
 import * as authService from './auth.service.js';
 import * as tokens from './token.service.js';
+import * as idempotency from '@/middleware/idempotency.js';
 
 function reqContext(req: FastifyRequest): { ipAddress?: string; userAgent?: string } {
   const ua = req.headers['user-agent'];
@@ -35,10 +36,18 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
   );
 
   // POST /auth/google - 🔓
+  // Honours `Idempotency-Key` so flaky-network retries don't burn rate limit
+  // budget or duplicate refresh-token rows. Lookup runs *before* token
+  // verification so a cached hit short-circuits without a JWKS round-trip.
   app.post(
     '/auth/google',
     { config: { rateLimitBucket: 'auth' } },
-    async (req) => {
+    async (req, reply) => {
+      const cached = await idempotency.lookup(req);
+      if (cached) {
+        reply.code(cached.status);
+        return cached.body;
+      }
       const body = parseBody(googleSignInSchema, req);
       const identity = await verifyGoogleIdToken(body.idToken);
       const { user } = await authService.upsertIdentity(identity);
@@ -48,20 +57,31 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
       issuedOpts.ipAddress = req.ip;
       const issued = await tokens.issueSession(issuedOpts);
       await audit(getDb(), { actorUserId: user.id, action: 'auth.login', metadata: { provider: 'google' }, ipAddress: req.ip, userAgent: String(req.headers['user-agent'] ?? '') });
-      return {
+      const responseBody = {
         accessToken: issued.accessToken,
         refreshToken: issued.refreshToken,
         accessTokenExpiresAt: issued.accessTokenExpiresAt,
         user,
       };
+      await idempotency.record(req, reply, responseBody);
+      return responseBody;
     },
   );
 
   // POST /auth/apple - 🔓
+  // Same idempotency treatment as /auth/google. Note: the nonce is consumed
+  // on the first attempt; retries rely on the cached response, which is fine
+  // because the apple nonce is bound to the Idempotency-Key via the request
+  // hash (a different nonce produces a different request_hash → 409).
   app.post(
     '/auth/apple',
     { config: { rateLimitBucket: 'auth' } },
-    async (req) => {
+    async (req, reply) => {
+      const cached = await idempotency.lookup(req);
+      if (cached) {
+        reply.code(cached.status);
+        return cached.body;
+      }
       const body = parseBody(appleSignInSchema, req);
       await consumeAppleNonce(body.nonce);
       const identity = await verifyAppleIdToken(body.identityToken, body.nonce);
@@ -72,12 +92,14 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
       issuedOpts.ipAddress = req.ip;
       const issued = await tokens.issueSession(issuedOpts);
       await audit(getDb(), { actorUserId: user.id, action: 'auth.login', metadata: { provider: 'apple' }, ipAddress: req.ip, userAgent: String(req.headers['user-agent'] ?? '') });
-      return {
+      const responseBody = {
         accessToken: issued.accessToken,
         refreshToken: issued.refreshToken,
         accessTokenExpiresAt: issued.accessTokenExpiresAt,
         user,
       };
+      await idempotency.record(req, reply, responseBody);
+      return responseBody;
     },
   );
 

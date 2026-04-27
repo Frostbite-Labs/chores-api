@@ -4,6 +4,13 @@
  * sha256(method+path+body))`. Replays return the cached response. Mismatched
  * request hash for the same key → 409 (deliberate; the client must use unique
  * keys per logical operation).
+ *
+ * Unauthenticated callers (`/auth/google`, `/auth/apple`) are supported via a
+ * sentinel all-zeros `user_id`. UUIDv7 generation always sets the version
+ * nibble to `7`, so the sentinel is unreachable as a real user id and never
+ * collides with an authed row. UUIDv4 idempotency keys carry 122 bits of
+ * entropy, so anonymous-key collisions in the 24h TTL window are not a real
+ * concern.
  */
 import { createHash, randomUUID as nodeRandomUUID } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
@@ -13,12 +20,17 @@ import { uuidToBin } from '@/lib/ids.js';
 import { IDEMPOTENCY_TTL_SEC } from '@/config/constants.js';
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const ANON_USER_ID = Buffer.alloc(16); // 16 zero bytes — see file-level comment.
 
 void nodeRandomUUID; // referenced so future callers can mint fresh keys server-side if needed
 
 export interface IdempotencyHit {
   status: number;
   body: unknown;
+}
+
+function userIdFor(req: FastifyRequest): Buffer {
+  return req.appCtx?.user ? uuidToBin(req.appCtx.user.id) : ANON_USER_ID;
 }
 
 /**
@@ -32,17 +44,13 @@ export async function lookup(req: FastifyRequest): Promise<IdempotencyHit | null
   if (!UUID_V4.test(key)) {
     throw new ValidationError({ code: 'idempotency.invalid_key', detail: 'Idempotency-Key must be a UUIDv4.' });
   }
-  if (!req.appCtx?.user) {
-    // Unauthenticated callers (e.g. /auth/google) - key the lookup by IP via the request hash.
-    return null;
-  }
 
   const requestHash = hashRequest(req);
   const db = getDb();
   const row = await db
     .selectFrom('idempotency_keys')
     .select(['request_hash', 'response_status', 'response_body', 'expires_at'])
-    .where('user_id', '=', uuidToBin(req.appCtx.user.id))
+    .where('user_id', '=', userIdFor(req))
     .where('key_value', '=', key)
     .executeTakeFirst();
 
@@ -61,7 +69,6 @@ export async function lookup(req: FastifyRequest): Promise<IdempotencyHit | null
 export async function record(req: FastifyRequest, reply: FastifyReply, body: unknown): Promise<void> {
   const key = req.headers['idempotency-key'];
   if (!key || typeof key !== 'string') return;
-  if (!req.appCtx?.user) return;
 
   const requestHash = hashRequest(req);
   const db = getDb();
@@ -69,7 +76,7 @@ export async function record(req: FastifyRequest, reply: FastifyReply, body: unk
   await db
     .insertInto('idempotency_keys')
     .values({
-      user_id: uuidToBin(req.appCtx.user.id),
+      user_id: userIdFor(req),
       key_value: key,
       request_hash: requestHash,
       response_status: reply.statusCode,

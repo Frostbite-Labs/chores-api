@@ -229,7 +229,9 @@ Refresh-replay detection (§5.2) bypasses the rate-limit response and returns im
 
 ### 6.5 Idempotency
 
-`POST` endpoints that have side effects (`/completions`, `/invites`, `/auth/google`, `/auth/apple`) accept an optional `Idempotency-Key` header (UUIDv4). Keys are stored in `idempotency_keys` for 24h alongside the response hash; replays return the cached response. This prevents double-completion when the mobile client retries on flaky networks.
+`POST` endpoints that have side effects accept an optional `Idempotency-Key` header (UUIDv4): `/completions`, `/auth/google`, `/auth/apple`. Keys are stored in `idempotency_keys` for 24h alongside the request hash; replays return the cached response, and reuse with a different body returns `409 idempotency.key_reused`. This prevents double-completion (and duplicate refresh-token rows on sign-in) when the mobile client retries on flaky networks.
+
+Unauthenticated callers (the two OAuth exchanges) are stored under a sentinel all-zeros `user_id`; UUIDv4 keys carry enough entropy that anonymous-key collisions in the 24h TTL window are not a concern. `/invites` does **not** honour the header — invite creation is admin-only and replays would clutter the storage with effectively no client benefit.
 
 ### 6.6 Audit log
 
@@ -237,7 +239,7 @@ Every state-changing action writes a row to `audit_log` with `(actor_user_id, ho
 
 ### 6.7 Account lifecycle
 
-- **Account deletion** (`DELETE /v1/auth/account`) sets `users.deleted_at`, anonymises `display_name`, drops `user_identities` rows immediately (so re-signing in creates a fresh account), and schedules a hard-purge job after 30 days. Households where the user was sole owner and sole member are deleted. Households where they were owner with other members trigger an ownership-transfer prompt; the API rejects deletion until ownership is reassigned.
+- **Account deletion** (`DELETE /v1/auth/account`) sets `users.deleted_at`, anonymises `display_name`, drops `user_identities` rows immediately (so re-signing in creates a fresh account), and schedules a hard-purge job after 30 days. Households where the user was sole owner and sole member are deleted. Households where they were owner with other members trigger an ownership-transfer prompt; the API rejects deletion until ownership is reassigned. Deletion is **one-way from the user's perspective** — there is no `restore` endpoint. The 30-day window is for internal data retention only (audit, regulatory) and never offers a return path.
 - **Provider unlink** is intentionally not exposed in v1 - a single linked provider is the only way back in. v2 may allow linking both Google and Apple to one account.
 
 ---
@@ -250,10 +252,11 @@ URL-prefixed: `/v1/...`. Breaking changes require `/v2`; additive changes (new f
 
 ### 7.2 Response envelope
 
-Single-resource and list responses are NOT wrapped - the body **is** the resource (or an array). Errors use RFC 7807 `application/problem+json` (see §4). Pagination metadata travels in headers:
+Single-resource and list responses are NOT wrapped - the body **is** the resource (or an array). Errors use RFC 7807 `application/problem+json` (see §4). The only paginated list endpoint is `GET /v1/.../completions`, which uses cursor pagination with the next cursor in a `Link` header:
 
-- `X-Total-Count: 1234`
 - `Link: </v1/.../completions?cursor=eyJ...>; rel="next"`
+
+Other list endpoints (`/members`, `/tasks`, `/invites`, `/me/households`, `/leaderboard`) are bounded per household and return all rows in a single response; no count or pagination headers are emitted, since `array.length` on the client is sufficient.
 
 ### 7.3 Time and IDs
 
@@ -327,6 +330,8 @@ Codes are 8 chars from a Crockford-ish alphabet (`ABCDEFGHJKLMNPQRSTUVWXYZ234567
 | `GET` | `/households/:householdId/invites` | 🔒 + 👑admin | Lists active (non-revoked, non-expired, used_count < max_uses) invites. |
 | `DELETE` | `/households/:householdId/invites/:inviteId` | 🔒 + 👑admin | Revokes. |
 | `POST` | `/invites/redeem` | 🔒 | Body: `{ code }`. Adds the user as a member with the invite's `role`/`permission`. Returns the household. Increments `used_count`. |
+
+> **Client migration note.** The existing local-only client persists a single `inviteCode` string on `HouseholdState` (see `createInitialHousehold` in `src/lib/household.ts`). Migrating to this API requires the client to: drop that field from the persisted blob, list active invites via `GET /v1/households/:householdId/invites` (admin-only), and surface a "generate invite" action that calls `POST` and shows the returned plaintext `code` with copy/share affordances and a one-time-show notice. The plaintext `code` field on `HouseholdInviteWithCode` is returned **only** by the create endpoint; subsequent list reads expose metadata (id, role, permission, expiry, usage) but never the code.
 
 ### 8.6 Tasks (`/v1/households/:householdId/tasks`)
 
@@ -604,6 +609,8 @@ CREATE TABLE tasks (
   CONSTRAINT fk_tasks_creator   FOREIGN KEY (created_by_user_id) REFERENCES users(id)
 ) ENGINE=InnoDB;
 ```
+
+`next_due_at` is `NOT NULL`. On `POST /v1/households/:id/tasks` the request body's `nextDueAt` is optional; when omitted, the server inserts `NOW(3)` (matches the existing client `toTaskRecord()` behaviour, so first-due is "right now"). Recurrence math (`addInterval`) advances this on every completion.
 
 ### 10.8 `task_completions`
 

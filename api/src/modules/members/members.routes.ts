@@ -11,7 +11,7 @@ import { getDb } from '@/db/pool.js';
 import { newUuid, uuidToBin } from '@/lib/ids.js';
 import { ConflictError, ForbiddenError, NotFoundError } from '@/lib/errors.js';
 import { audit } from '@/lib/audit.js';
-import { uuidSchema } from '@/schemas/common.js';
+import { parseIfMatch, uuidSchema } from '@/schemas/common.js';
 import { createMemberSchema, patchMemberSchema } from '@/schemas/members.js';
 import { rowToMember, bumpHouseholdVersion } from '@/db/repositories/households.js';
 import type { HouseholdMember } from '@/types/member.js';
@@ -82,9 +82,10 @@ export async function registerMembersRoutes(app: FastifyInstance): Promise<void>
   app.patch(
     '/households/:householdId/members/:memberId',
     { config: { requiresAuth: true, requiresHouseholdPermission: 'member', rateLimitBucket: 'authedDefault' } },
-    async (req) => {
+    async (req, reply) => {
       const params = parseParams(memberParamsSchema, req);
       const body = parseBody(patchMemberSchema, req);
+      const ifMatch = parseIfMatch(req.headers['if-match'] as string | undefined);
       const acting = req.appCtx.member as HouseholdMember;
 
       const isSelfEdit = acting.id === params.memberId;
@@ -121,6 +122,13 @@ export async function registerMembersRoutes(app: FastifyInstance): Promise<void>
           .where('removed_at', 'is', null)
           .executeTakeFirst();
         if (!current) throw new NotFoundError({ code: 'member.not_found', detail: 'Member not found.' });
+        if (ifMatch !== null && ifMatch !== Number(current.row_version)) {
+          throw new ConflictError({
+            code: 'concurrency.row_version_stale',
+            detail: 'If-Match did not match the current row_version.',
+            errors: { current: rowToMember(current) },
+          });
+        }
 
         const set: Record<string, unknown> = {};
         if (body.displayName !== undefined) set['display_name'] = body.displayName;
@@ -161,16 +169,29 @@ export async function registerMembersRoutes(app: FastifyInstance): Promise<void>
         targetId: params.memberId,
         metadata: { changes: body },
       });
-      return rowToMember(member);
+      const out = rowToMember(member);
+      reply.header('ETag', `"${out.rowVersion}"`);
+      return out;
     },
   );
 
-  // DELETE /households/:id/members/:memberId - 🔒 + admin
+  // DELETE /households/:id/members/:memberId - 🔒 + member (self) / admin (other).
+  // Route-level decorator floors at `member` so a non-admin can leave a household;
+  // the handler then upgrades the requirement to `admin` when removing someone else.
+  // The owner-cannot-remove-self guard below stays as the safety net.
   app.delete(
     '/households/:householdId/members/:memberId',
-    { config: { requiresAuth: true, requiresHouseholdPermission: 'admin', rateLimitBucket: 'authedDefault' } },
+    { config: { requiresAuth: true, requiresHouseholdPermission: 'member', rateLimitBucket: 'authedDefault' } },
     async (req, reply) => {
       const params = parseParams(memberParamsSchema, req);
+      const acting = req.appCtx.member as HouseholdMember;
+      const isSelf = acting.id === params.memberId;
+      if (!isSelf && acting.permission === 'member') {
+        throw new ForbiddenError({
+          code: 'household.permission_denied',
+          detail: 'Removing another member requires admin permission.',
+        });
+      }
       const db = getDb();
       await db.transaction().execute(async (tx) => {
         const current = await tx
