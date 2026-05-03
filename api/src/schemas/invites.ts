@@ -19,5 +19,13 @@ export const redeemInviteSchema = z.object({
     .regex(codeRegex, { message: 'invalid invite code' }),
 });
 
+export const previewInviteQuerySchema = z.object({
+  code: z
+    .string()
+    .length(INVITE_CODE_LENGTH)
+    .regex(codeRegex, { message: 'invalid invite code' }),
+});
+
 export type CreateInviteBody = z.infer<typeof createInviteSchema>;
 export type RedeemInviteBody = z.infer<typeof redeemInviteSchema>;
+export type PreviewInviteQuery = z.infer<typeof previewInviteQuerySchema>;

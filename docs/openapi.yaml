@@ -391,6 +391,33 @@ components:
           $ref: '#/components/schemas/Household'
         member:
           $ref: '#/components/schemas/HouseholdMember'
+    InvitePreview:
+      type: object
+      description: >-
+        Read-only confirmation payload returned before redeem. `householdId` is deliberately omitted so a leaked URL
+        does not expose it.
+      required:
+        - householdName
+        - inviterDisplayName
+        - role
+        - permission
+        - expiresAt
+      properties:
+        householdName:
+          type: string
+          maxLength: 80
+        inviterDisplayName:
+          type: string
+          maxLength: 80
+        role:
+          $ref: '#/components/schemas/HouseholdRole'
+        permission:
+          type: string
+          enum:
+            - admin
+            - member
+        expiresAt:
+          $ref: '#/components/schemas/IsoTimestamp'
     LeaderboardEntry:
       type: object
       required:
@@ -450,46 +477,20 @@ components:
           $ref: '#/components/schemas/HouseholdPermission'
     SessionResponse:
       type: object
+      required:
+        - accessToken
+        - refreshToken
+        - accessTokenExpiresAt
+        - user
       properties:
         accessToken:
           type: string
         refreshToken:
           type: string
         accessTokenExpiresAt:
-          type: string
+          $ref: '#/components/schemas/IsoTimestamp'
         user:
-          type: object
-          properties:
-            id:
-              type: string
-            email:
-              type: string
-              nullable: true
-            emailVerified:
-              type: boolean
-            displayName:
-              type: string
-            avatar:
-              type: string
-            createdAt:
-              type: string
-            updatedAt:
-              type: string
-          required:
-            - id
-            - email
-            - emailVerified
-            - displayName
-            - avatar
-            - createdAt
-            - updatedAt
-          additionalProperties: false
-      required:
-        - accessToken
-        - refreshToken
-        - accessTokenExpiresAt
-        - user
-      additionalProperties: false
+          $ref: '#/components/schemas/User'
     AppleNonceResponse:
       type: object
       properties:
@@ -1011,7 +1012,9 @@ components:
                   - payload
                   - clientId
                 additionalProperties: false
-                description: Insert a task. Caller must hold `admin` permission.
+                description: >-
+                  Insert a task. Caller must hold `admin` permission. When `nextDueAt` is omitted, the server defaults
+                  to the operation's effective time (same as `POST /tasks`).
               - type: object
                 properties:
                   kind:
@@ -2502,6 +2505,65 @@ paths:
         - bearerAuth: []
       x-required-household-permission: admin
       operationId: deleteHouseholdsByHouseholdIdInvitesByInviteId
+  /v1/invites/preview:
+    get:
+      summary: Preview an invite code before redeeming.
+      description: >-
+        Returns the household name, inviter display name, role and permission the redeemer would receive, plus the
+        invite's expiry. Every unusable state (unknown / expired / revoked / exhausted) collapses to `404
+        invite.not_found` so callers cannot probe which codes were ever live. The household ID is deliberately omitted
+        from the response. Shares the `inviteRedeem` rate-limit bucket (10/hour/user).
+      tags:
+        - invites
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 8
+            maxLength: 8
+            pattern: ^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{8}$
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvitePreview'
+        '400':
+          description: Validation failed.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: Authentication required or token invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Resource not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: Internal server error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+      security:
+        - bearerAuth: []
+      operationId: getInvitesPreview
   /v1/invites/redeem:
     post:
       summary: Redeem an invite code, joining the caller as a member.

@@ -38,6 +38,36 @@ export interface IssuedSession {
   refreshToken: string;
   accessTokenExpiresAt: string;
   familyId: string;
+  /** The user the session was issued for. Surfaced for callers that need to audit. */
+  userId: string;
+}
+
+/**
+ * Pack an IPv4/IPv6 textual address into the `VARBINARY(16)` shape used by
+ * `refresh_tokens.ip_address`. Returns null on parse failure (storing an IP is
+ * advisory; we never reject a sign-in over a malformed `req.ip`).
+ */
+function ipToBuffer(ip: string | undefined): Buffer | null {
+  if (!ip) return null;
+  if (ip.includes(':')) {
+    try {
+      const groups = expandV6(ip);
+      return Buffer.from(groups.replaceAll(':', ''), 'hex');
+    } catch {
+      return null;
+    }
+  }
+  const parts = ip.split('.').map(Number);
+  if (parts.length !== 4 || parts.some((n) => Number.isNaN(n) || n < 0 || n > 255)) return null;
+  return Buffer.from(parts);
+}
+
+function expandV6(ip: string): string {
+  const dz = ip.split('::');
+  const left = dz[0] ? dz[0].split(':') : [];
+  const right = dz[1] ? dz[1].split(':') : [];
+  const fill = Array<string>(8 - left.length - right.length).fill('0000');
+  return [...left, ...fill, ...right].map((g) => g.padStart(4, '0')).join(':');
 }
 
 function sha256Hex(input: string): string {
@@ -72,8 +102,8 @@ export async function issueSession(input: IssueSessionInput): Promise<IssuedSess
       user_id: uuidToBin(input.userId),
       token_hash: refreshHash,
       device_label: input.deviceLabel ?? null,
-      user_agent: input.userAgent ?? null,
-      ip_address: null,
+      user_agent: input.userAgent ? input.userAgent.slice(0, 255) : null,
+      ip_address: ipToBuffer(input.ipAddress),
       issued_at: now,
       expires_at: expiresAt,
       revoked_at: null,
@@ -88,6 +118,7 @@ export async function issueSession(input: IssueSessionInput): Promise<IssuedSess
     accessTokenExpiresAt: access.expiresAt,
     refreshToken,
     familyId,
+    userId: input.userId,
   };
 }
 
@@ -146,8 +177,8 @@ export async function rotateRefreshToken(presented: string, ctx: { ipAddress?: s
         user_id: row.user_id,
         token_hash: newHash,
         device_label: row.device_label,
-        user_agent: ctx.userAgent ?? row.user_agent,
-        ip_address: null,
+        user_agent: (ctx.userAgent ?? row.user_agent ?? null)?.slice(0, 255) ?? null,
+        ip_address: ipToBuffer(ctx.ipAddress) ?? row.ip_address,
         issued_at: new Date(),
         expires_at: newExpires,
         revoked_at: null,
@@ -165,7 +196,7 @@ export async function rotateRefreshToken(presented: string, ctx: { ipAddress?: s
     const userId = binToUuid(row.user_id);
     const familyId = binToUuid(row.family_id);
     const access = await signAccessToken(userId, familyId);
-    return { accessToken: access.token, accessTokenExpiresAt: access.expiresAt, refreshToken: newToken, familyId };
+    return { accessToken: access.token, accessTokenExpiresAt: access.expiresAt, refreshToken: newToken, familyId, userId };
   });
 }
 

@@ -13,6 +13,7 @@ import { registerErrorHandler } from './middleware/errorHandler.js';
 import { registerAuthHook } from './middleware/auth.js';
 import { registerAuthorizeHook } from './middleware/authorize.js';
 import { registerRateLimit } from './middleware/rateLimit.js';
+import { registerAccessLog } from './middleware/accessLog.js';
 import { registerAuthRoutes } from './modules/auth/auth.routes.js';
 import { registerUsersRoutes } from './modules/users/users.routes.js';
 import { registerHouseholdsRoutes } from './modules/households/households.routes.js';
@@ -27,11 +28,15 @@ export async function buildApp(): Promise<FastifyInstance> {
   const env = loadEnv();
   const app = Fastify({
     logger: { level: env.LOG_LEVEL },
+    // Suppress Fastify's built-in incoming/completed pair; `accessLog`
+    // emits a single consolidated line per response with richer fields.
+    disableRequestLogging: true,
     genReqId: () => `req-${cryptoId()}`,
     bodyLimit: 1_500_000,
   });
 
   registerErrorHandler(app);
+  registerAccessLog(app);
 
   // Initialize the per-request appCtx slot. Auth + authorize hooks fill it in.
   app.addHook('onRequest', async (req) => {

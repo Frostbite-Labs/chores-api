@@ -220,7 +220,7 @@ Set via `@fastify/helmet`:
 | Surface | Limit | Window | Key |
 | --- | --- | --- | --- |
 | `POST /v1/auth/*` | 10 | 5 min | IP + provider-subject (when known) |
-| `POST /v1/invites/redeem` | 10 | 1 hour | IP + user |
+| `POST /v1/invites/redeem`, `GET /v1/invites/preview` | 10 | 1 hour | IP + user |
 | `POST` on completions / tasks | 60 | 1 min | user |
 | All other authenticated | 600 | 1 min | user |
 | Unauthenticated catch-all | 60 | 1 min | IP |
@@ -235,11 +235,11 @@ Unauthenticated callers (the two OAuth exchanges) are stored under a sentinel al
 
 ### 6.6 Audit log
 
-Every state-changing action writes a row to `audit_log` with `(actor_user_id, household_id, action, target_type, target_id, ip, user_agent, metadata, created_at)`. Auth events (`auth.login`, `auth.refresh`, `auth.refresh.replay_detected`, `auth.account.delete`) and permission changes are mandatory; CRUD on tasks is best-effort.
+Every state-changing action writes a row to `audit_log` with `(actor_user_id, household_id, action, target_type, target_id, ip, user_agent, metadata, created_at)`. Auth events (`auth.login`, `auth.refresh`, `auth.refresh.replay_detected`, `auth.account.delete`) and permission changes are mandatory; CRUD on tasks is best-effort. Invite preview lookups also audit (`invite.preview` on success, `invite.preview.lookup_failed` on the collapsed-404 failure path) so a flood of misses is visible against the success baseline.
 
 ### 6.7 Account lifecycle
 
-- **Account deletion** (`DELETE /v1/auth/account`) sets `users.deleted_at`, anonymises `display_name`, drops `user_identities` rows immediately (so re-signing in creates a fresh account), and schedules a hard-purge job after 30 days. Households where the user was sole owner and sole member are deleted. Households where they were owner with other members trigger an ownership-transfer prompt; the API rejects deletion until ownership is reassigned. Deletion is **one-way from the user's perspective** — there is no `restore` endpoint. The 30-day window is for internal data retention only (audit, regulatory) and never offers a return path.
+- **Account deletion** (`DELETE /v1/auth/account`) sets `users.deleted_at`, anonymises `display_name`, drops `user_identities` rows immediately (so re-signing in creates a fresh account), and schedules a hard-purge job after 30 days. Households where the user was sole owner and sole member are deleted. Households where they were owner with other members trigger an ownership-transfer prompt; the API rejects deletion until ownership is reassigned. Memberships in households the user joined as a non-owner are soft-removed and emit `member` tombstones so co-members' sync clients drop the row on the next pull. Deletion is **one-way from the user's perspective** — there is no `restore` endpoint. The 30-day window is for internal data retention only (audit, regulatory) and never offers a return path.
 - **Provider unlink** is intentionally not exposed in v1 - a single linked provider is the only way back in. v2 may allow linking both Google and Apple to one account.
 
 ---
@@ -330,6 +330,7 @@ Codes are 8 chars from a Crockford-ish alphabet (`ABCDEFGHJKLMNPQRSTUVWXYZ234567
 | `GET` | `/households/:householdId/invites` | 🔒 + 👑admin | Lists active (non-revoked, non-expired, used_count < max_uses) invites. |
 | `DELETE` | `/households/:householdId/invites/:inviteId` | 🔒 + 👑admin | Revokes. |
 | `POST` | `/invites/redeem` | 🔒 | Body: `{ code }`. Adds the user as a member with the invite's `role`/`permission`. Returns the household. Increments `used_count`. |
+| `GET` | `/invites/preview?code=...` | 🔒 | Returns `{ householdName, inviterDisplayName, role, permission, expiresAt }` so the client can confirm "you'll join household X as a Y with Z access" before calling redeem. Any unusable state (unknown / expired / revoked / `used_count >= max_uses`) collapses to `404 invite.not_found` to avoid leaking which codes were ever live. The household ID is intentionally omitted; a leaked URL must not expose it. Shares the `inviteRedeem` rate-limit bucket. |
 
 > **Client migration note.** The existing local-only client persists a single `inviteCode` string on `HouseholdState` (see `createInitialHousehold` in `src/lib/household.ts`). Migrating to this API requires the client to: drop that field from the persisted blob, list active invites via `GET /v1/households/:householdId/invites` (admin-only), and surface a "generate invite" action that calls `POST` and shows the returned plaintext `code` with copy/share affordances and a one-time-show notice. The plaintext `code` field on `HouseholdInviteWithCode` is returned **only** by the create endpoint; subsequent list reads expose metadata (id, role, permission, expiry, usage) but never the code.
 

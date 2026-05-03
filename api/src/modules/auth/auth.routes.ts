@@ -6,8 +6,9 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { parseBody } from '@/middleware/validate.js';
 import { audit } from '@/lib/audit.js';
 import { getDb } from '@/db/pool.js';
-import { uuidToBin } from '@/lib/ids.js';
+import { binToUuid, uuidToBin } from '@/lib/ids.js';
 import { ConflictError } from '@/lib/errors.js';
+import { bumpHouseholdVersion } from '@/db/repositories/households.js';
 import {
   appleSignInSchema,
   googleSignInSchema,
@@ -104,12 +105,23 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
   );
 
   // POST /auth/refresh - 🔓
+  // Spec §6.6 lists `auth.refresh` as a mandatory audit event. Replay detection
+  // already audits inside `rotateRefreshToken`; success is audited here so the
+  // log carries both halves of the rotation lifecycle.
   app.post(
     '/auth/refresh',
     { config: { rateLimitBucket: 'auth' } },
     async (req) => {
       const body = parseBody(refreshSchema, req);
       const issued = await tokens.rotateRefreshToken(body.refreshToken, reqContext(req));
+      await audit(getDb(), {
+        actorUserId: issued.userId,
+        action: 'auth.refresh',
+        targetType: 'refresh_token_family',
+        targetId: issued.familyId,
+        ipAddress: req.ip,
+        userAgent: typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : null,
+      });
       return {
         accessToken: issued.accessToken,
         refreshToken: issued.refreshToken,
@@ -174,22 +186,56 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
       }
 
       await db.transaction().execute(async (tx) => {
+        const now = new Date();
         await tx
           .updateTable('users')
-          .set({ deleted_at: new Date(), display_name: 'Deleted user', email: null })
+          .set({ deleted_at: now, display_name: 'Deleted user', email: null })
           .where('id', '=', uuidToBin(user.id))
           .execute();
         await tx.deleteFrom('user_identities').where('user_id', '=', uuidToBin(user.id)).execute();
-        // Delete sole-owner-sole-member households.
+
+        // Soft-remove non-owner memberships in *other* households and emit
+        // tombstones so co-members' sync clients drop the row. Owner-permission
+        // memberships only exist in households we delete entirely below — the
+        // sole-owner-sole-member precondition was already enforced.
+        const otherMemberships = await tx
+          .selectFrom('household_members')
+          .select(['id', 'household_id'])
+          .where('user_id', '=', uuidToBin(user.id))
+          .where('removed_at', 'is', null)
+          .where('permission', '!=', 'owner')
+          .execute();
+        for (const m of otherMemberships) {
+          await tx
+            .updateTable('household_members')
+            .set({ removed_at: now })
+            .where('id', '=', m.id)
+            .execute();
+          const householdIdStr = binToUuid(m.household_id);
+          const newVersion = await bumpHouseholdVersion(tx, householdIdStr);
+          await tx
+            .insertInto('sync_tombstones')
+            .values({
+              household_id: m.household_id,
+              entity_type: 'member',
+              entity_id: m.id,
+              deleted_row_version: newVersion,
+            })
+            .onDuplicateKeyUpdate({ deleted_row_version: newVersion, deleted_at: now })
+            .execute();
+        }
+
+        // Delete sole-owner-sole-member households (the prior count check
+        // guarantees these are the only owned households at this point).
         await tx
           .updateTable('households')
-          .set({ deleted_at: new Date() })
+          .set({ deleted_at: now })
           .where('owner_user_id', '=', uuidToBin(user.id))
           .where('deleted_at', 'is', null)
           .execute();
         await tx
           .updateTable('refresh_tokens')
-          .set({ revoked_at: new Date() })
+          .set({ revoked_at: now })
           .where('user_id', '=', uuidToBin(user.id))
           .where('revoked_at', 'is', null)
           .execute();

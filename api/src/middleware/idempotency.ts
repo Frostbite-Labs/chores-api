@@ -22,6 +22,15 @@ import { IDEMPOTENCY_TTL_SEC } from '@/config/constants.js';
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ANON_USER_ID = Buffer.alloc(16); // 16 zero bytes — see file-level comment.
 
+/**
+ * Hard cap on cached response body size. The DB column is `MEDIUMBLOB` (16MB),
+ * but our largest legitimate response is the sync push reply (~hundreds of KB
+ * worst case). 1MB leaves comfortable headroom while preventing storage abuse
+ * from a misbehaving handler. Oversized bodies skip the cache write — the
+ * client retry will simply re-execute the side effect.
+ */
+const MAX_CACHED_BODY_BYTES = 1_000_000;
+
 void nodeRandomUUID; // referenced so future callers can mint fresh keys server-side if needed
 
 export interface IdempotencyHit {
@@ -71,6 +80,15 @@ export async function record(req: FastifyRequest, reply: FastifyReply, body: unk
   if (!key || typeof key !== 'string') return;
 
   const requestHash = hashRequest(req);
+  const bodyBuf = Buffer.from(JSON.stringify(body), 'utf8');
+  if (bodyBuf.byteLength > MAX_CACHED_BODY_BYTES) {
+    // Skip cache rather than blow past the column limit. Retries will re-run
+    // the side effect; that's a worse experience than caching, but better than
+    // an opaque 500 from MySQL on the next request that happens to use the
+    // same key.
+    req.log.warn({ size: bodyBuf.byteLength, key }, 'idempotency.body_too_large_skipping_cache');
+    return;
+  }
   const db = getDb();
   const expiresAt = new Date(Date.now() + IDEMPOTENCY_TTL_SEC * 1000);
   await db
@@ -80,12 +98,12 @@ export async function record(req: FastifyRequest, reply: FastifyReply, body: unk
       key_value: key,
       request_hash: requestHash,
       response_status: reply.statusCode,
-      response_body: Buffer.from(JSON.stringify(body), 'utf8'),
+      response_body: bodyBuf,
       expires_at: expiresAt,
     })
     .onDuplicateKeyUpdate({
       response_status: reply.statusCode,
-      response_body: Buffer.from(JSON.stringify(body), 'utf8'),
+      response_body: bodyBuf,
       expires_at: expiresAt,
     })
     .execute();

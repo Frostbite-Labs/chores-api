@@ -29,6 +29,13 @@ export async function audit(
   logFailure?: (err: unknown) => void,
 ): Promise<void> {
   try {
+    // Clamp to the column widths so adversarial UAs/oversized metadata can't
+    // throw an error inside the audit writer (we silently swallow above, so a
+    // throw here would mean *no* audit row at all — strictly worse).
+    const userAgent = entry.userAgent ? entry.userAgent.slice(0, 255) : null;
+    const metadataJson = entry.metadata ? JSON.stringify(entry.metadata) : null;
+    const metadataClamped =
+      metadataJson && metadataJson.length > 64_000 ? metadataJson.slice(0, 64_000) : metadataJson;
     await db
       .insertInto('audit_log')
       .values({
@@ -38,10 +45,10 @@ export async function audit(
         target_type: entry.targetType ?? null,
         target_id: entry.targetId ? uuidToBin(entry.targetId) : null,
         ip_address: entry.ipAddress ? ipToBuffer(entry.ipAddress) : null,
-        user_agent: entry.userAgent ?? null,
+        user_agent: userAgent,
         // mysql2 does not auto-stringify objects for JSON columns, so we do it
         // here. Storing as a string is interchangeable for the JSON type.
-        metadata: entry.metadata ? JSON.stringify(entry.metadata) : null,
+        metadata: metadataClamped,
       })
       .execute();
   } catch (err) {

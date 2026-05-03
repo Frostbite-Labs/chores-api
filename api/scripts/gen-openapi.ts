@@ -26,14 +26,13 @@ import {
   appleSignInSchema,
   googleSignInSchema,
   refreshSchema,
-  sessionResponseSchema,
 } from '../src/schemas/auth.js';
 import {
   createHouseholdSchema,
   renameHouseholdSchema,
   transferOwnershipSchema,
 } from '../src/schemas/households.js';
-import { createInviteSchema, redeemInviteSchema } from '../src/schemas/invites.js';
+import { createInviteSchema, previewInviteQuerySchema, redeemInviteSchema } from '../src/schemas/invites.js';
 import { leaderboardQuerySchema } from '../src/schemas/leaderboard.js';
 import { createMemberSchema, patchMemberSchema } from '../src/schemas/members.js';
 import { syncPullQuerySchema, syncPushBodySchema } from '../src/schemas/sync.js';
@@ -237,6 +236,19 @@ const components: Record<string, JsonSchema> = {
       member: ref('HouseholdMember'),
     },
   },
+  InvitePreview: {
+    type: 'object',
+    description:
+      'Read-only confirmation payload returned before redeem. `householdId` is deliberately omitted so a leaked URL does not expose it.',
+    required: ['householdName', 'inviterDisplayName', 'role', 'permission', 'expiresAt'],
+    properties: {
+      householdName: { type: 'string', maxLength: 80 },
+      inviterDisplayName: { type: 'string', maxLength: 80 },
+      role: ref('HouseholdRole'),
+      permission: { type: 'string', enum: ['admin', 'member'] },
+      expiresAt: ref('IsoTimestamp'),
+    },
+  },
 
   LeaderboardEntry: {
     type: 'object',
@@ -272,7 +284,16 @@ const components: Record<string, JsonSchema> = {
     },
   },
 
-  SessionResponse: zod(sessionResponseSchema),
+  SessionResponse: {
+    type: 'object',
+    required: ['accessToken', 'refreshToken', 'accessTokenExpiresAt', 'user'],
+    properties: {
+      accessToken: { type: 'string' },
+      refreshToken: { type: 'string' },
+      accessTokenExpiresAt: ref('IsoTimestamp'),
+      user: ref('User'),
+    },
+  },
   AppleNonceResponse: zod(appleNonceResponseSchema),
   RefreshResponse: {
     type: 'object',
@@ -376,7 +397,8 @@ const components: Record<string, JsonSchema> = {
   )?.['operations'] as JsonSchema | undefined;
   const variants = (opsItems?.['items'] as JsonSchema | undefined)?.['anyOf'] as JsonSchema[] | undefined;
   const variantDescriptions: Record<string, string> = {
-    'task.create': 'Insert a task. Caller must hold `admin` permission.',
+    'task.create':
+      "Insert a task. Caller must hold `admin` permission. When `nextDueAt` is omitted, the server defaults to the operation's effective time (same as `POST /tasks`).",
     'task.update': 'Update a task with optimistic concurrency via `ifMatchRowVersion`. Caller must hold `admin`.',
     'task.delete': 'Soft-delete a task and emit a tombstone. Caller must hold `admin`.',
     'completion.create':
@@ -786,6 +808,18 @@ const paths: Record<string, Record<string, JsonSchema>> = {
       parameters: [householdIdParam, inviteIdParam],
       response: { status: 204 },
       errors: ['401', '403', '404', '429', '500'],
+    }),
+  },
+  '/v1/invites/preview': {
+    get: op({
+      summary: 'Preview an invite code before redeeming.',
+      description:
+        'Returns the household name, inviter display name, role and permission the redeemer would receive, plus the invite\'s expiry. Every unusable state (unknown / expired / revoked / exhausted) collapses to `404 invite.not_found` so callers cannot probe which codes were ever live. The household ID is deliberately omitted from the response. Shares the `inviteRedeem` rate-limit bucket (10/hour/user).',
+      tags: ['invites'],
+      auth: 'bearer',
+      query: previewInviteQuerySchema,
+      response: { status: 200, schema: ref('InvitePreview') },
+      errors: ['400', '401', '404', '429', '500'],
     }),
   },
   '/v1/invites/redeem': {

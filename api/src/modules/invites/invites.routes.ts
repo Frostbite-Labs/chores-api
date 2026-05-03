@@ -7,13 +7,13 @@
 import type { FastifyInstance } from 'fastify';
 import { randomInt } from 'node:crypto';
 import { z } from 'zod';
-import { parseBody, parseParams } from '@/middleware/validate.js';
+import { parseBody, parseParams, parseQuery } from '@/middleware/validate.js';
 import { getDb } from '@/db/pool.js';
 import { newUuid, uuidToBin, binToUuid } from '@/lib/ids.js';
 import { ConflictError, NotFoundError } from '@/lib/errors.js';
 import { audit } from '@/lib/audit.js';
 import { uuidSchema } from '@/schemas/common.js';
-import { createInviteSchema, redeemInviteSchema } from '@/schemas/invites.js';
+import { createInviteSchema, previewInviteQuerySchema, redeemInviteSchema } from '@/schemas/invites.js';
 import {
   INVITE_ALPHABET,
   INVITE_CODE_LENGTH,
@@ -147,6 +147,71 @@ export async function registerInvitesRoutes(app: FastifyInstance): Promise<void>
         .where('revoked_at', 'is', null)
         .execute();
       reply.code(204).send();
+    },
+  );
+
+  // GET /invites/preview - 🔒 (NOT under :householdId; same reason as redeem).
+  // Lets the client surface "you'll join household X as a Y with Z access" before
+  // calling redeem. Every unusable state (unknown / expired / revoked / exhausted)
+  // collapses to the same 404 invite.not_found so we don't leak which codes were
+  // ever live (spec §8.5). Household ID is deliberately omitted from the response.
+  app.get(
+    '/invites/preview',
+    { config: { requiresAuth: true, rateLimitBucket: 'inviteRedeem' } },
+    async (req) => {
+      const query = parseQuery(previewInviteQuerySchema, req);
+      const userId = req.appCtx.user!.id;
+      const db = getDb();
+
+      const row = await db
+        .selectFrom('household_invites as i')
+        .innerJoin('households as h', 'h.id', 'i.household_id')
+        .innerJoin('users as u', 'u.id', 'i.created_by_user_id')
+        .select([
+          'h.name as household_name',
+          'h.deleted_at as household_deleted_at',
+          'u.display_name as inviter_display_name',
+          'i.invited_role',
+          'i.invited_permission',
+          'i.expires_at',
+          'i.revoked_at',
+          'i.used_count',
+          'i.max_uses',
+        ])
+        .where('i.code', '=', query.code)
+        .executeTakeFirst();
+
+      const isUsable =
+        row !== undefined &&
+        row.household_deleted_at === null &&
+        row.revoked_at === null &&
+        row.expires_at.getTime() > Date.now() &&
+        row.used_count < row.max_uses;
+
+      if (!isUsable) {
+        await audit(getDb(), {
+          actorUserId: userId,
+          action: 'invite.preview.lookup_failed',
+          targetType: 'invite',
+          metadata: { code: query.code },
+        });
+        throw new NotFoundError({ code: 'invite.not_found', detail: 'Unknown invite code.' });
+      }
+
+      await audit(getDb(), {
+        actorUserId: userId,
+        action: 'invite.preview',
+        targetType: 'invite',
+        metadata: { code: query.code },
+      });
+
+      return {
+        householdName: row.household_name,
+        inviterDisplayName: row.inviter_display_name,
+        role: row.invited_role,
+        permission: row.invited_permission,
+        expiresAt: row.expires_at.toISOString(),
+      };
     },
   );
 
