@@ -47,20 +47,20 @@ services:
     networks:
       - boring-chores
 
-  migrate:
-    build:
-      context: ./api
-      dockerfile: Dockerfile
-    command: ["dist/db/migrate.js", "up"]
-    environment:
-      NODE_ENV: development
-      DB_URL: mysql://root:root@mysql:3306/chore_club
-    depends_on:
-      mysql:
-        condition: service_healthy
-    restart: "no"
-    networks:
-      - boring-chores
+  # migrate:
+  #   build:
+  #     context: ./api
+  #     dockerfile: Dockerfile
+  #   command: ["dist/db/migrate.js", "up"]
+  #   environment:
+  #     NODE_ENV: development
+  #     DB_URL: mysql://root:root@mysql:3306/chore_club
+  #   depends_on:
+  #     mysql:
+  #       condition: service_healthy
+  #   restart: "no"
+  #   networks:
+  #     - boring-chores
 
   api:
     build:
