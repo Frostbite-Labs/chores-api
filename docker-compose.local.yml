@@ -64,7 +64,7 @@ services:
 
   api:
     build:
-      context: ./api
+      context: .
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:

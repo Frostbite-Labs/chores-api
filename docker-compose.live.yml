@@ -21,7 +21,9 @@
 
 services:
   api:
-    image: ${IMAGE_REPOSITORY:-chore-club-api}:${IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
     restart: unless-stopped
     environment:
       NODE_ENV: production
