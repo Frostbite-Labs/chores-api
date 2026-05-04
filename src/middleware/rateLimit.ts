@@ -36,6 +36,7 @@ export async function registerRateLimit(app: FastifyInstance): Promise<void> {
     const bucket = (route.config as { rateLimitBucket?: Bucket } | undefined)?.rateLimitBucket;
     if (!bucket) return;
     const cfg = RATE_LIMITS[bucket];
+    if (!cfg) throw new Error(`unknown rateLimitBucket "${bucket}" on ${route.method} ${route.url}`);
     const existing = (route.config ?? {}) as Record<string, unknown>;
     const existingRl = (existing['rateLimit'] ?? {}) as Record<string, unknown>;
     route.config = {

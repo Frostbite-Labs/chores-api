@@ -30,7 +30,7 @@ export const LIMITS = {
 
 /** Rate-limit table (§6.4). */
 export const RATE_LIMITS = {
-  authPost: { max: 10, windowMs: 5 * 60 * 1000 },
+  auth: { max: 10, windowMs: 5 * 60 * 1000 },
   inviteRedeem: { max: 10, windowMs: 60 * 60 * 1000 },
   writeHotPath: { max: 60, windowMs: 60 * 1000 },
   authedDefault: { max: 600, windowMs: 60 * 1000 },

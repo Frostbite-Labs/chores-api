@@ -1948,21 +1948,8 @@
     "/v1/auth/google": {
       "post": {
         "summary": "Sign in with a Google ID token. Returns a session + user profile.",
-        "description": "Honours `Idempotency-Key` (24h TTL) so flaky-network retries don't duplicate refresh-token rows. Reuse with a different body returns 409 `idempotency.key_reused`.",
         "tags": [
           "auth"
-        ],
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": false,
-            "description": "UUIDv4. Replay of the same key + request body returns the cached response (24h TTL).",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
         ],
         "responses": {
           "200": {
@@ -1987,16 +1974,6 @@
           },
           "401": {
             "description": "Authentication required or token invalid.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Conflict — stale `If-Match`, idempotency-key reuse, or domain conflict.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2043,21 +2020,8 @@
     "/v1/auth/apple": {
       "post": {
         "summary": "Sign in with an Apple identity token + previously issued nonce.",
-        "description": "Honours `Idempotency-Key` (24h TTL) so flaky-network retries don't duplicate refresh-token rows. Reuse with a different body returns 409 `idempotency.key_reused`.",
         "tags": [
           "auth"
-        ],
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": false,
-            "description": "UUIDv4. Replay of the same key + request body returns the cached response (24h TTL).",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
         ],
         "responses": {
           "200": {
@@ -2082,16 +2046,6 @@
           },
           "401": {
             "description": "Authentication required or token invalid.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Conflict — stale `If-Match`, idempotency-key reuse, or domain conflict.",
             "content": {
               "application/problem+json": {
                 "schema": {

@@ -18,9 +18,17 @@ export interface UpsertUserResult {
 }
 
 /**
- * Upsert (provider, providerSubject) → user; when the provider is new for an
- * existing email-matched user we link the identity onto the same account.
- * Spec §5.1.
+ * Upsert (provider, providerSubject) → user.
+ *
+ * Cross-provider linking by verified email is intentionally NOT supported here:
+ * each provider's `email_verified` flag is only as trustworthy as the provider's
+ * verification model (Google Workspace admins can attest any local-part on
+ * their own domain; Apple sets `email_verified: true` for both private-relay
+ * and personal-claimed addresses without RP-distinguishable proof). Trusting
+ * the chain transitively let an attacker who pre-claims an email at one
+ * provider hijack the legitimate owner's first sign-in at the other. New
+ * (provider, sub) pairs always create a new user; explicit linking will land
+ * on a separate authenticated endpoint.
  */
 export async function upsertIdentity(identity: VerifiedIdentity): Promise<UpsertUserResult> {
   const db = getDb();
@@ -38,35 +46,17 @@ export async function upsertIdentity(identity: VerifiedIdentity): Promise<Upsert
       return { user: rowToUser(existing), created: false };
     }
 
-    // No identity yet. If the provider gave us a verified email and a user with
-    // that email already exists, link this identity to that user instead of
-    // creating a duplicate account.
-    let userId: string | null = null;
-    if (identity.email && identity.emailVerified) {
-      const byEmail = await tx
-        .selectFrom('users')
-        .selectAll()
-        .where('email', '=', identity.email)
-        .where('deleted_at', 'is', null)
-        .executeTakeFirst();
-      if (byEmail) userId = binToUuid(byEmail.id);
-    }
-
-    let createdNow = false;
-    if (!userId) {
-      userId = newUuid();
-      await tx
-        .insertInto('users')
-        .values({
-          id: uuidToBin(userId),
-          email: identity.email,
-          email_verified: identity.emailVerified ? 1 : 0,
-          display_name: defaultDisplayNameFromEmail(identity.email),
-          avatar: '⭐',
-        })
-        .execute();
-      createdNow = true;
-    }
+    const userId = newUuid();
+    await tx
+      .insertInto('users')
+      .values({
+        id: uuidToBin(userId),
+        email: identity.email,
+        email_verified: identity.emailVerified ? 1 : 0,
+        display_name: defaultDisplayNameFromEmail(identity.email),
+        avatar: '⭐',
+      })
+      .execute();
 
     await tx
       .insertInto('user_identities')
@@ -84,7 +74,7 @@ export async function upsertIdentity(identity: VerifiedIdentity): Promise<Upsert
       .selectAll()
       .where('id', '=', uuidToBin(userId))
       .executeTakeFirstOrThrow();
-    return { user: rowToUser(fresh), created: createdNow };
+    return { user: rowToUser(fresh), created: true };
   });
 }
 

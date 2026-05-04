@@ -588,27 +588,21 @@ const paths: Record<string, Record<string, JsonSchema>> = {
   '/v1/auth/google': {
     post: op({
       summary: 'Sign in with a Google ID token. Returns a session + user profile.',
-      description:
-        'Honours `Idempotency-Key` (24h TTL) so flaky-network retries don\'t duplicate refresh-token rows. Reuse with a different body returns 409 `idempotency.key_reused`.',
       tags: ['auth'],
       auth: 'none',
-      parameters: [idempotencyKeyHeader],
       body: { schema: 'GoogleSignInBody' },
       response: { status: 200, schema: ref('SessionResponse') },
-      errors: ['400', '401', '409', '429', '500'],
+      errors: ['400', '401', '429', '500'],
     }),
   },
   '/v1/auth/apple': {
     post: op({
       summary: 'Sign in with an Apple identity token + previously issued nonce.',
-      description:
-        'Honours `Idempotency-Key` (24h TTL) so flaky-network retries don\'t duplicate refresh-token rows. Reuse with a different body returns 409 `idempotency.key_reused`.',
       tags: ['auth'],
       auth: 'none',
-      parameters: [idempotencyKeyHeader],
       body: { schema: 'AppleSignInBody' },
       response: { status: 200, schema: ref('SessionResponse') },
-      errors: ['400', '401', '409', '429', '500'],
+      errors: ['400', '401', '429', '500'],
     }),
   },
   '/v1/auth/refresh': {
@@ -1070,7 +1064,7 @@ const doc = {
 // ─── Write output ───────────────────────────────────────────────────────────
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const outDir = path.resolve(__dirname, '../../docs');
+const outDir = path.resolve(__dirname, '../docs');
 mkdirSync(outDir, { recursive: true });
 
 const yamlPath = path.join(outDir, 'openapi.yaml');

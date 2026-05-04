@@ -51,7 +51,7 @@ services:
   #   build:
   #     context: ./api
   #     dockerfile: Dockerfile
-  #   command: ["dist/db/migrate.js", "up"]
+  #   command: ["dist/src/db/migrate.js", "up"]
   #   environment:
   #     NODE_ENV: development
   #     DB_URL: mysql://root:root@mysql:3306/chore_club

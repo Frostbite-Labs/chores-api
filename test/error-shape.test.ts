@@ -6,8 +6,9 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/db/pool.js', () => ({ getPool: () => ({ query: async () => [] }), getDb: () => ({}), closeDb: async () => {} }));
 vi.mock('@/lib/redis.js', () => ({ getRedis: () => ({ ping: async () => 'PONG' }), closeRedis: async () => {} }));
-// @fastify/rate-limit hits Redis at registration; bypass it in unit tests.
-vi.mock('@/middleware/rateLimit.js', () => ({ registerRateLimit: async () => {} }));
+// @fastify/rate-limit hits Redis at registration; stub the plugin but keep our
+// real registerRateLimit so the `onRoute` hook still runs (catches bucket typos).
+vi.mock('@fastify/rate-limit', () => ({ default: async () => {} }));
 
 const requiredEnv = {
   NODE_ENV: 'test',

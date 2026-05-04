@@ -143,6 +143,14 @@ export async function rotateRefreshToken(presented: string, ctx: { ipAddress?: s
     if (row.expires_at.getTime() < Date.now()) {
       throw new AuthError({ code: 'auth.refresh.expired', detail: 'Refresh token has expired.' });
     }
+    const userRow = await tx
+      .selectFrom('users')
+      .select('deleted_at')
+      .where('id', '=', row.user_id)
+      .executeTakeFirst();
+    if (!userRow || userRow.deleted_at !== null) {
+      throw new AuthError({ code: 'auth.refresh.unknown', detail: 'Refresh token is not recognised.' });
+    }
     if (row.revoked_at) {
       // Replay: kill the entire family and audit.
       await tx

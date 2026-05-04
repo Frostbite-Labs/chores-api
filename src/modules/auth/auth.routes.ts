@@ -19,7 +19,6 @@ import { verifyAppleIdToken } from './apple.verifier.js';
 import { consumeAppleNonce, issueAppleNonce } from './nonce.service.js';
 import * as authService from './auth.service.js';
 import * as tokens from './token.service.js';
-import * as idempotency from '@/middleware/idempotency.js';
 
 function reqContext(req: FastifyRequest): { ipAddress?: string; userAgent?: string } {
   const ua = req.headers['user-agent'];
@@ -37,18 +36,15 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
   );
 
   // POST /auth/google - 🔓
-  // Honours `Idempotency-Key` so flaky-network retries don't burn rate limit
-  // budget or duplicate refresh-token rows. Lookup runs *before* token
-  // verification so a cached hit short-circuits without a JWKS round-trip.
+  // Idempotency caching is intentionally NOT applied: the response carries the
+  // plaintext access JWT and refresh token, and persisting them in
+  // `idempotency_keys.response_body` would defeat the at-rest hashing of
+  // `refresh_tokens.token_hash`. The auth rate-limit bucket bounds retry abuse;
+  // a duplicate retry simply mints a fresh session.
   app.post(
     '/auth/google',
     { config: { rateLimitBucket: 'auth' } },
-    async (req, reply) => {
-      const cached = await idempotency.lookup(req);
-      if (cached) {
-        reply.code(cached.status);
-        return cached.body;
-      }
+    async (req) => {
       const body = parseBody(googleSignInSchema, req);
       const identity = await verifyGoogleIdToken(body.idToken);
       const { user } = await authService.upsertIdentity(identity);
@@ -58,31 +54,21 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
       issuedOpts.ipAddress = req.ip;
       const issued = await tokens.issueSession(issuedOpts);
       await audit(getDb(), { actorUserId: user.id, action: 'auth.login', metadata: { provider: 'google' }, ipAddress: req.ip, userAgent: String(req.headers['user-agent'] ?? '') });
-      const responseBody = {
+      return {
         accessToken: issued.accessToken,
         refreshToken: issued.refreshToken,
         accessTokenExpiresAt: issued.accessTokenExpiresAt,
         user,
       };
-      await idempotency.record(req, reply, responseBody);
-      return responseBody;
     },
   );
 
   // POST /auth/apple - 🔓
-  // Same idempotency treatment as /auth/google. Note: the nonce is consumed
-  // on the first attempt; retries rely on the cached response, which is fine
-  // because the apple nonce is bound to the Idempotency-Key via the request
-  // hash (a different nonce produces a different request_hash → 409).
+  // See /auth/google: idempotency caching is omitted to keep tokens off-disk.
   app.post(
     '/auth/apple',
     { config: { rateLimitBucket: 'auth' } },
-    async (req, reply) => {
-      const cached = await idempotency.lookup(req);
-      if (cached) {
-        reply.code(cached.status);
-        return cached.body;
-      }
+    async (req) => {
       const body = parseBody(appleSignInSchema, req);
       await consumeAppleNonce(body.nonce);
       const identity = await verifyAppleIdToken(body.identityToken, body.nonce);
@@ -93,14 +79,12 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
       issuedOpts.ipAddress = req.ip;
       const issued = await tokens.issueSession(issuedOpts);
       await audit(getDb(), { actorUserId: user.id, action: 'auth.login', metadata: { provider: 'apple' }, ipAddress: req.ip, userAgent: String(req.headers['user-agent'] ?? '') });
-      const responseBody = {
+      return {
         accessToken: issued.accessToken,
         refreshToken: issued.refreshToken,
         accessTokenExpiresAt: issued.accessTokenExpiresAt,
         user,
       };
-      await idempotency.record(req, reply, responseBody);
-      return responseBody;
     },
   );
 
@@ -238,6 +222,14 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
           .set({ revoked_at: now })
           .where('user_id', '=', uuidToBin(user.id))
           .where('revoked_at', 'is', null)
+          .execute();
+
+        // Purge cached responses keyed to this user so a replay can't return
+        // any pre-deletion side-effect data. Auth endpoints no longer cache
+        // tokens, but other side-effecting POSTs (completions, invites) do.
+        await tx
+          .deleteFrom('idempotency_keys')
+          .where('user_id', '=', uuidToBin(user.id))
           .execute();
       });
 

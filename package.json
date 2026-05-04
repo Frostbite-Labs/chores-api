@@ -8,15 +8,13 @@
     "node": ">=20.11.0"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "start": "node dist/server.js",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/src/server.js",
     "dev": "tsx watch src/server.ts",
     "lint": "eslint . --ext .ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "migrate": "tsx src/db/migrate.ts up",
-    "migrate:status": "tsx src/db/migrate.ts status",
     "openapi": "tsx scripts/gen-openapi.ts && cp ../docs/openapi.yaml ../../chore-list/docs/openapi.yaml"
   },
   "dependencies": {
