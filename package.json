@@ -8,7 +8,7 @@
     "node": ">=20.11.0"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
     "start": "node dist/src/server.js",
     "dev": "tsx watch src/server.ts",
     "lint": "eslint . --ext .ts",
@@ -40,6 +40,7 @@
     "eslint": "^8.57.0",
     "js-yaml": "^4.1.1",
     "supertest": "^6.3.3",
+    "tsc-alias": "^1.8.17",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3",
     "vitest": "^1.2.0",
