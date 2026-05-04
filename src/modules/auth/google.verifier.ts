@@ -7,7 +7,7 @@
  * accept tokens issued for other services.
  */
 import { createRemoteJWKSet, jwtVerify } from 'jose';
-import { AuthError } from '@/lib/errors.js';
+import { AppError, AuthError } from '@/lib/errors.js';
 import { loadEnv } from '@/config/env.js';
 import type { VerifiedIdentity } from '@/types/auth.js';
 
@@ -30,6 +30,12 @@ interface GoogleClaims {
 
 export async function verifyGoogleIdToken(idToken: string): Promise<VerifiedIdentity> {
   const env = loadEnv();
+  if (!env.GOOGLE_CLIENT_ID) {
+    throw new AppError(501, {
+      code: 'auth.google.not_configured',
+      detail: 'Google sign-in is not configured on this server.',
+    });
+  }
   let payload: GoogleClaims;
   try {
     const result = await jwtVerify(idToken, getJwks(), {

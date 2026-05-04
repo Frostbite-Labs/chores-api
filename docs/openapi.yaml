@@ -9,7 +9,7 @@ info:
 servers:
   - url: http://localhost:3000
     description: Local docker-compose stack.
-  - url: https://api.choreclub.app
+  - url: https://chore-app-api.frostbitelabs.net
     description: Production.
 tags:
   - name: health

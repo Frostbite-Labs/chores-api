@@ -7,7 +7,7 @@
  */
 import { createHash } from 'node:crypto';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
-import { AuthError } from '@/lib/errors.js';
+import { AppError, AuthError } from '@/lib/errors.js';
 import { loadEnv } from '@/config/env.js';
 import type { VerifiedIdentity } from '@/types/auth.js';
 
@@ -34,6 +34,12 @@ interface AppleClaims {
 
 export async function verifyAppleIdToken(idToken: string, expectedNonce: string): Promise<VerifiedIdentity> {
   const env = loadEnv();
+  if (!env.APPLE_SERVICE_ID) {
+    throw new AppError(501, {
+      code: 'auth.apple.not_configured',
+      detail: 'Apple sign-in is not configured on this server.',
+    });
+  }
   let payload: AppleClaims;
   try {
     const result = await jwtVerify(idToken, getJwks(), {
