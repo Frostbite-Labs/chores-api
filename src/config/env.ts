@@ -32,15 +32,24 @@ const EnvSchema = z
      * OAuth providers are individually optional, but at least one must be fully
      * configured (enforced in `superRefine` below). Apple is all-or-nothing
      * across its four vars — a partial Apple config is always a misconfiguration.
+     *
+     * `GOOGLE_CLIENT_ID` is the canonical (web) client ID. `GOOGLE_IOS_CLIENT_ID`
+     * and `GOOGLE_ANDROID_CLIENT_ID` are additional accepted audiences for native
+     * clients that issue ID tokens audienced for their platform-specific OAuth
+     * client (e.g. expo-auth-session/providers/google on iOS/Android).
      */
     GOOGLE_CLIENT_ID: optionalSecret,
+    GOOGLE_IOS_CLIENT_ID: optionalSecret,
+    GOOGLE_ANDROID_CLIENT_ID: optionalSecret,
     APPLE_SERVICE_ID: optionalSecret,
     APPLE_TEAM_ID: optionalSecret,
     APPLE_KEY_ID: optionalSecret,
     APPLE_PRIVATE_KEY: optionalSecret,
   })
   .superRefine((env, ctx) => {
-    const googleConfigured = Boolean(env.GOOGLE_CLIENT_ID);
+    const googleConfigured = Boolean(
+      env.GOOGLE_CLIENT_ID || env.GOOGLE_IOS_CLIENT_ID || env.GOOGLE_ANDROID_CLIENT_ID,
+    );
     const appleSet = APPLE_KEYS.filter((k) => Boolean(env[k]));
     const appleAllSet = appleSet.length === APPLE_KEYS.length;
     const appleAnySet = appleSet.length > 0;

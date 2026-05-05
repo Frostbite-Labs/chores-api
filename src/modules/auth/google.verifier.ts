@@ -30,7 +30,12 @@ interface GoogleClaims {
 
 export async function verifyGoogleIdToken(idToken: string): Promise<VerifiedIdentity> {
   const env = loadEnv();
-  if (!env.GOOGLE_CLIENT_ID) {
+  // Web is canonical; iOS/Android are additional audiences for tokens minted by
+  // native clients whose OAuth flow audiences the platform-specific client ID.
+  const audiences = [env.GOOGLE_CLIENT_ID, env.GOOGLE_IOS_CLIENT_ID, env.GOOGLE_ANDROID_CLIENT_ID].filter(
+    (v): v is string => Boolean(v),
+  );
+  if (audiences.length === 0) {
     throw new AppError(501, {
       code: 'auth.google.not_configured',
       detail: 'Google sign-in is not configured on this server.',
@@ -39,7 +44,7 @@ export async function verifyGoogleIdToken(idToken: string): Promise<VerifiedIden
   let payload: GoogleClaims;
   try {
     const result = await jwtVerify(idToken, getJwks(), {
-      audience: env.GOOGLE_CLIENT_ID,
+      audience: audiences,
       // jose validates `iss` against this set - `||` accepted form just in case Google rotates.
       issuer: [...GOOGLE_ISSUERS],
     });
