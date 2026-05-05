@@ -30,3 +30,25 @@ services:
     ports:
       - "${API_PORT:-3000}:3000"
     stop_grace_period: 30s
+    networks:
+      chores:
+      internal-only:
+        ipv4_address: 172.21.0.2
+    depends_on:
+      - redis
+  redis:
+    image: redis
+    command: redis-server --loglevel warning --requirepass ${REDIS_PASSWORD}
+    networks:
+      chores:
+
+networks:
+  chores:
+    name: chore-net
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.15.0.0/24
+          ip_range: 172.15.0.0/24
+  internal-only:
+    external: true
